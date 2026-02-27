@@ -11,7 +11,7 @@ run:
 	cargo run
 
 release:
-	cargo build --release
+	cargo build --release --target x86_64-unknown-linux-musl
 
 clean:
 	cargo clean

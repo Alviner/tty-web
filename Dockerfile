@@ -9,7 +9,8 @@ RUN curl -fsSL "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/${OHMYZSH_COMM
     && sh /tmp/install.sh \
     && rm /tmp/install.sh
 
-COPY target/release/tty-web /usr/local/bin/tty-web
+ARG BINARY=target/x86_64-unknown-linux-musl/release/tty-web
+COPY ${BINARY} /usr/local/bin/tty-web
 ENV LANG=C.UTF-8
 ENV TERM=xterm-256color
 

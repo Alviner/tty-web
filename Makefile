@@ -1,5 +1,6 @@
 IMAGE ?= ghcr.io/alviner/tty-web
 VERSION ?= $(shell cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')
+TARGET ?= $(shell rustc -vV | awk '/host/{print $$2}' | sed 's/gnu/musl/')
 
 .PHONY: build run release clean fmt lint check
 .PHONY: docker upload
@@ -11,7 +12,7 @@ run:
 	cargo run
 
 release:
-	cargo build --release --target x86_64-unknown-linux-musl
+	cargo build --release --target $(TARGET)
 
 clean:
 	cargo clean
@@ -26,4 +27,4 @@ check:
 	cargo check
 
 docker: release
-	docker build -t $(IMAGE):$(VERSION) .
+	docker build --build-arg BINARY=target/$(TARGET)/release/tty-web -t $(IMAGE):$(VERSION) .

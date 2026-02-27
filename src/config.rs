@@ -1,3 +1,5 @@
+use std::net::IpAddr;
+
 use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
@@ -5,7 +7,7 @@ use clap::Parser;
 pub struct Config {
     /// Address to bind to
     #[arg(long, default_value = "127.0.0.1", env = "TTY_WEB_ADDRESS")]
-    pub address: String,
+    pub address: IpAddr,
 
     /// Port to listen on
     #[arg(long, default_value_t = 9090, env = "TTY_WEB_PORT")]

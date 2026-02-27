@@ -1,5 +1,5 @@
 use std::process::Child;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
@@ -15,8 +15,9 @@ const READ_BUF_SIZE: usize = 4096;
 
 pub struct Terminal {
     input_tx: mpsc::Sender<Vec<u8>>,
+    output_tx: broadcast::Sender<Vec<u8>>,
     fd: Arc<AsyncFd<std::os::fd::OwnedFd>>,
-    child: Option<Child>,
+    child: Mutex<Option<Child>>,
 }
 
 impl Terminal {
@@ -45,17 +46,12 @@ impl Terminal {
         let (output_tx, output_rx) =
             broadcast::channel(OUTPUT_CHANNEL_SIZE);
 
-        // Read task: PTY → broadcast channel
-        // output_tx is sole-owned by this task; when the shell exits
-        // (EIO on master fd), the task exits and drops the sender,
-        // closing the broadcast channel for the receiver.
         let read_fd = fd.clone();
+        let read_tx = output_tx.clone();
         tokio::spawn(async move {
-            read_loop(read_fd, output_tx).await;
+            read_loop(read_fd, read_tx).await;
         });
 
-        // Write task: input channel → PTY
-        // Exits when input_tx is dropped (Terminal dropped).
         let write_fd = fd.clone();
         tokio::spawn(async move {
             write_loop(write_fd, input_rx).await;
@@ -63,10 +59,31 @@ impl Terminal {
 
         let terminal = Terminal {
             input_tx,
+            output_tx,
             fd,
-            child: Some(child),
+            child: Mutex::new(Some(child)),
         };
         Ok((terminal, output_rx))
+    }
+
+    pub fn subscribe(&self) -> broadcast::Receiver<Vec<u8>> {
+        self.output_tx.subscribe()
+    }
+
+    pub fn is_alive(&self) -> bool {
+        let mut child = self.child.lock().unwrap();
+        match child.as_mut() {
+            Some(c) => match c.try_wait() {
+                Ok(None) => true,
+                _ => {
+                    // Child exited or error — take it out so Drop
+                    // won't send SIGHUP to a potentially reused PID.
+                    child.take();
+                    false
+                }
+            },
+            None => false,
+        }
     }
 
     pub async fn write(&self, data: Vec<u8>) -> Result<(), String> {
@@ -83,7 +100,7 @@ impl Terminal {
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        if let Some(mut child) = self.child.take() {
+        if let Some(mut child) = self.child.get_mut().unwrap().take() {
             let pid = Pid::from_raw(child.id() as i32);
             let _ = signal::kill(pid, Signal::SIGHUP);
             let _ = child.wait();

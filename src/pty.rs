@@ -14,7 +14,7 @@ pub struct PtyMaster {
 impl PtyMaster {
     pub fn spawn(shell: &str) -> std::io::Result<Self> {
         let pty = openpty(None, None).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::Other, e)
+            std::io::Error::other(e)
         })?;
 
         let slave_out = pty.slave.try_clone()?;
@@ -50,13 +50,13 @@ impl PtyMaster {
         let raw = pty.master.as_raw_fd();
         let flags = fcntl::fcntl(raw, fcntl::FcntlArg::F_GETFL)
             .map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::Other, e)
+                std::io::Error::other(e)
             })?;
         let mut flags = fcntl::OFlag::from_bits_truncate(flags);
         flags.insert(fcntl::OFlag::O_NONBLOCK);
         fcntl::fcntl(raw, fcntl::FcntlArg::F_SETFL(flags))
             .map_err(|e| {
-                std::io::Error::new(std::io::ErrorKind::Other, e)
+                std::io::Error::other(e)
             })?;
 
         Ok(PtyMaster {

@@ -1,0 +1,6 @@
+zsh
+git
+vim
+neovim
+curl
+htop

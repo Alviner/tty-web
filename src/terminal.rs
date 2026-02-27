@@ -1,4 +1,3 @@
-use std::os::fd::AsRawFd;
 use std::process::Child;
 use std::sync::Arc;
 
@@ -106,7 +105,7 @@ async fn read_loop(
             }
         };
 
-        match nix::unistd::read(fd.as_raw_fd(), &mut buf) {
+        match nix::unistd::read(&*fd, &mut buf) {
             Ok(0) => break,
             Ok(n) => {
                 if tx.send(buf[..n].to_vec()).is_err() {

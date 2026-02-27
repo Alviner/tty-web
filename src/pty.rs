@@ -13,9 +13,7 @@ pub struct PtyMaster {
 
 impl PtyMaster {
     pub fn spawn(shell: &str) -> std::io::Result<Self> {
-        let pty = openpty(None, None).map_err(|e| {
-            std::io::Error::other(e)
-        })?;
+        let pty = openpty(None, None).map_err(|e| std::io::Error::other(e))?;
 
         let slave_out = pty.slave.try_clone()?;
         let slave_err = pty.slave.try_clone()?;
@@ -33,12 +31,7 @@ impl PtyMaster {
                     if libc::setsid() == -1 {
                         return Err(std::io::Error::last_os_error());
                     }
-                    if libc::ioctl(
-                        libc::STDIN_FILENO,
-                        libc::TIOCSCTTY,
-                        0,
-                    ) == -1
-                    {
+                    if libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY, 0) == -1 {
                         return Err(std::io::Error::last_os_error());
                     }
                     Ok(())
@@ -47,17 +40,12 @@ impl PtyMaster {
         };
 
         // Set master fd to non-blocking for async I/O
-        let raw = pty.master.as_raw_fd();
-        let flags = fcntl::fcntl(raw, fcntl::FcntlArg::F_GETFL)
-            .map_err(|e| {
-                std::io::Error::other(e)
-            })?;
+        let flags = fcntl::fcntl(&pty.master, fcntl::FcntlArg::F_GETFL)
+            .map_err(|e| std::io::Error::other(e))?;
         let mut flags = fcntl::OFlag::from_bits_truncate(flags);
         flags.insert(fcntl::OFlag::O_NONBLOCK);
-        fcntl::fcntl(raw, fcntl::FcntlArg::F_SETFL(flags))
-            .map_err(|e| {
-                std::io::Error::other(e)
-            })?;
+        fcntl::fcntl(&pty.master, fcntl::FcntlArg::F_SETFL(flags))
+            .map_err(|e| std::io::Error::other(e))?;
 
         Ok(PtyMaster {
             master: pty.master,
@@ -70,11 +58,7 @@ impl PtyMaster {
 ///
 /// Safe wrapper around `ioctl(TIOCSWINSZ)`. The caller must
 /// pass an fd that refers to a valid PTY master or slave.
-pub fn set_window_size(
-    fd: impl AsFd,
-    rows: u16,
-    cols: u16,
-) -> std::io::Result<()> {
+pub fn set_window_size(fd: impl AsFd, rows: u16, cols: u16) -> std::io::Result<()> {
     let ws = libc::winsize {
         ws_row: rows,
         ws_col: cols,
@@ -83,13 +67,7 @@ pub fn set_window_size(
     };
     // Safety: fd is a valid file descriptor (enforced by AsFd),
     // ws is a valid winsize struct on the stack.
-    let ret = unsafe {
-        libc::ioctl(
-            fd.as_fd().as_raw_fd(),
-            libc::TIOCSWINSZ,
-            &ws,
-        )
-    };
+    let ret = unsafe { libc::ioctl(fd.as_fd().as_raw_fd(), libc::TIOCSWINSZ, &ws) };
     if ret == -1 {
         Err(std::io::Error::last_os_error())
     } else {

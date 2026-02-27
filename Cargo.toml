@@ -1,13 +1,13 @@
 [package]
 name = "tty-web"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "Web-based terminal emulator"
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
-nix = { version = "0.29", features = ["term", "fs", "signal"] }
+nix = { version = "0.31", features = ["term", "fs", "signal"] }
 rust-embed = "8"
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"

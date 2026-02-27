@@ -13,7 +13,7 @@ pub struct PtyMaster {
 
 impl PtyMaster {
     pub fn spawn(shell: &str) -> std::io::Result<Self> {
-        let pty = openpty(None, None).map_err(|e| std::io::Error::other(e))?;
+        let pty = openpty(None, None).map_err(std::io::Error::other)?;
 
         let slave_out = pty.slave.try_clone()?;
         let slave_err = pty.slave.try_clone()?;
@@ -41,11 +41,11 @@ impl PtyMaster {
 
         // Set master fd to non-blocking for async I/O
         let flags = fcntl::fcntl(&pty.master, fcntl::FcntlArg::F_GETFL)
-            .map_err(|e| std::io::Error::other(e))?;
+            .map_err(std::io::Error::other)?;
         let mut flags = fcntl::OFlag::from_bits_truncate(flags);
         flags.insert(fcntl::OFlag::O_NONBLOCK);
         fcntl::fcntl(&pty.master, fcntl::FcntlArg::F_SETFL(flags))
-            .map_err(|e| std::io::Error::other(e))?;
+            .map_err(std::io::Error::other)?;
 
         Ok(PtyMaster {
             master: pty.master,

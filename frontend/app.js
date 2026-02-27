@@ -6,6 +6,7 @@ var CMD_RESIZE = 0x01;
 var CMD_OUTPUT = 0x00;
 var CMD_SESSION_ID = 0x10;
 var CMD_SCROLLBACK = 0x11;
+var CMD_SHELL_EXIT = 0x12;
 
 var RECONNECT_BASE_MS = 1000;
 var RECONNECT_MAX_MS = 5000;
@@ -31,14 +32,15 @@ function buildResizeFrame(rows, cols) {
 
 function main() {
   var term = new Terminal({
-    cursorBlink: true,
+    allowProposedApi: true,
     fontFamily:
-      "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
+      "'LigaHack Nerd Font', monospace",
     fontSize: 14,
     theme: {
       background: "#1a1b26",
       foreground: "#c0caf5",
       cursor: "#c0caf5",
+      cursorAccent: "#1a1b26",
     },
   });
 
@@ -50,9 +52,42 @@ function main() {
   term.open(document.getElementById("terminal"));
   fitAddon.fit();
 
+  // Ligatures: enable OpenType contextual alternates and register
+  // a character joiner so xterm.js draws ligature sequences as a
+  // single text run, letting the font apply substitution rules.
+  var LIGATURES = [
+    "<!--", "<!---", "===", "!==", ">>>", "<<<", "<-->", "-->",
+    "<--", "<->", "=>", "->", "<-", ">=", "<=", "!=", "::", "...",
+    "/*", "*/", "//", "++", "+++", "||", "&&", "??", "?.", "|>",
+    "<|", "<|>", "<*", "<*>", "*>", "<:", ":>", ":=", "=:", "=~",
+    "!~", "<<", ">>", "==", "--", "++"
+  ].sort(function (a, b) { return b.length - a.length; });
+
+  term.element.style.fontFeatureSettings = '"calt" on';
+  term.registerCharacterJoiner(function (text) {
+    var ranges = [];
+    var i = 0;
+    while (i < text.length) {
+      var matched = false;
+      for (var j = 0; j < LIGATURES.length; j++) {
+        var lig = LIGATURES[j];
+        if (text.substring(i, i + lig.length) === lig) {
+          ranges.push([i, i + lig.length]);
+          i += lig.length;
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) i++;
+    }
+    return ranges;
+  });
+
   var ws = null;
   var reconnectDelay = RECONNECT_BASE_MS;
   var resizeSent = false;
+  var shellExited = false;
+  var replaying = false;
 
   function sendResize() {
     if (!resizeSent && ws && ws.readyState === WebSocket.OPEN) {
@@ -104,15 +139,24 @@ function main() {
           break;
         case CMD_SCROLLBACK:
           console.log("[tty-web] scrollback:", payload.length, "bytes");
+          replaying = true;
           term.reset();
-          term.write(payload);
-          term.write("\x1b[?25h");
-          sendResize();
+          term.write(payload, function () {
+            term.write("\x1b[?25h");
+            replaying = false;
+            sendResize();
+          });
+          break;
+        case CMD_SHELL_EXIT:
+          shellExited = true;
+          sessionStorage.removeItem("tty-web-sid");
+          term.write("\r\n\x1b[90m[Shell exited.]\x1b[0m\r\n");
           break;
       }
     };
 
     ws.onclose = function () {
+      if (shellExited) return;
       term.write(
         "\r\n\x1b[33m[Disconnected. Reconnecting in " +
           Math.round(reconnectDelay / 1000) +
@@ -129,12 +173,14 @@ function main() {
   }
 
   term.onData(function (data) {
+    if (replaying) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(buildInputFrame(data));
     }
   });
 
   term.onBinary(function (data) {
+    if (replaying) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
       var bytes = new Uint8Array(data.length);
       for (var i = 0; i < data.length; i++) {

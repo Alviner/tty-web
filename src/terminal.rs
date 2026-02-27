@@ -5,7 +5,7 @@ use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use tokio::io::unix::AsyncFd;
 use tokio::io::Interest;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::pty::PtyMaster;
 
@@ -18,6 +18,7 @@ pub struct Terminal {
     output_tx: broadcast::Sender<Vec<u8>>,
     fd: Arc<AsyncFd<std::os::fd::OwnedFd>>,
     child: Mutex<Option<Child>>,
+    closed_rx: watch::Receiver<bool>,
 }
 
 impl Terminal {
@@ -45,11 +46,13 @@ impl Terminal {
         let (input_tx, input_rx) = mpsc::channel(INPUT_CHANNEL_SIZE);
         let (output_tx, output_rx) =
             broadcast::channel(OUTPUT_CHANNEL_SIZE);
+        let (closed_tx, closed_rx) = watch::channel(false);
 
         let read_fd = fd.clone();
         let read_tx = output_tx.clone();
         tokio::spawn(async move {
             read_loop(read_fd, read_tx).await;
+            let _ = closed_tx.send(true);
         });
 
         let write_fd = fd.clone();
@@ -62,6 +65,7 @@ impl Terminal {
             output_tx,
             fd,
             child: Mutex::new(Some(child)),
+            closed_rx,
         };
         Ok((terminal, output_rx))
     }
@@ -70,20 +74,10 @@ impl Terminal {
         self.output_tx.subscribe()
     }
 
-    pub fn is_alive(&self) -> bool {
-        let mut child = self.child.lock().unwrap();
-        match child.as_mut() {
-            Some(c) => match c.try_wait() {
-                Ok(None) => true,
-                _ => {
-                    // Child exited or error — take it out so Drop
-                    // won't send SIGHUP to a potentially reused PID.
-                    child.take();
-                    false
-                }
-            },
-            None => false,
-        }
+    /// Returns a watch receiver that becomes `true` when the PTY read
+    /// loop exits (shell died / PTY closed).
+    pub fn closed(&self) -> watch::Receiver<bool> {
+        self.closed_rx.clone()
     }
 
     pub async fn write(&self, data: Vec<u8>) -> Result<(), String> {

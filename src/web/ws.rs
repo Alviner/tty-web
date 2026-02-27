@@ -18,6 +18,7 @@ const CMD_RESIZE: u8 = 0x01;
 const CMD_OUTPUT: u8 = 0x00;
 const CMD_SESSION_ID: u8 = 0x10;
 const CMD_SCROLLBACK: u8 = 0x11;
+const CMD_SHELL_EXIT: u8 = 0x12;
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -72,6 +73,7 @@ async fn handle_socket(
     }
 
     // Main loop: bridge WebSocket ↔ session
+    let mut closed_rx = session.terminal.closed();
     loop {
         tokio::select! {
             result = output_rx.recv() => {
@@ -109,6 +111,25 @@ async fn handle_socket(
                     _ => {}
                 }
             }
+            _ = closed_rx.changed() => {
+                // Drain buffered output before sending exit
+                while let Ok(data) = output_rx.try_recv() {
+                    let mut frame = Vec::with_capacity(1 + data.len());
+                    frame.push(CMD_OUTPUT);
+                    frame.extend_from_slice(&data);
+                    if socket
+                        .send(Message::Binary(frame.into()))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                let _ = socket
+                    .send(Message::Binary(vec![CMD_SHELL_EXIT].into()))
+                    .await;
+                break;
+            }
         }
     }
     session.detach();
@@ -120,7 +141,6 @@ fn resolve_or_create(
 ) -> std::io::Result<(Arc<Session>, String)> {
     if let Some(sid) = sid
         && let Some(session) = state.sessions.get(&sid)
-        && session.is_alive()
     {
         tracing::info!("reattaching to session {sid}");
         return Ok((session, sid));

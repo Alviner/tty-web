@@ -33,6 +33,7 @@ impl Session {
             detached_at: Mutex::new(None),
         });
 
+        // Scrollback collector
         let weak: Weak<Session> = Arc::downgrade(&session);
         let mut rx = output_rx;
         tokio::spawn(async move {
@@ -62,8 +63,6 @@ impl Session {
     }
 
     /// Subscribe to live output and get a scrollback snapshot atomically.
-    /// The subscription is created while holding the scrollback lock,
-    /// guaranteeing no gaps or duplicates between scrollback and live stream.
     pub fn attach(&self) -> (Vec<u8>, broadcast::Receiver<Vec<u8>>) {
         self.clients.fetch_add(1, Ordering::Relaxed);
         *self.detached_at.lock().unwrap() = None;
@@ -79,11 +78,7 @@ impl Session {
         }
     }
 
-    pub fn is_alive(&self) -> bool {
-        self.terminal.is_alive()
-    }
-
-    pub fn is_orphaned(&self) -> bool {
+    fn is_orphaned(&self) -> bool {
         if self.clients.load(Ordering::Relaxed) > 0 {
             return false;
         }
@@ -100,51 +95,57 @@ pub struct SessionStore {
 
 impl SessionStore {
     pub fn new() -> Arc<Self> {
-        let store = Arc::new(Self {
+        Arc::new(Self {
             sessions: RwLock::new(HashMap::new()),
-        });
+        })
+    }
 
-        let weak = Arc::downgrade(&store);
+    pub fn insert(
+        self: &Arc<Self>,
+        session: Arc<Session>,
+    ) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.sessions
+            .write()
+            .unwrap()
+            .insert(id.clone(), session.clone());
+
+        // Reaper task: waits for shell exit, then orphan timeout
+        let store = Arc::downgrade(self);
+        let sid = id.clone();
+        let mut closed_rx = session.terminal.closed();
         tokio::spawn(async move {
-            let mut interval =
-                tokio::time::interval(std::time::Duration::from_secs(5));
+            // Wait for shell to exit
+            let _ = closed_rx.changed().await;
+
+            // Shell is dead — if no clients, remove immediately.
+            // Otherwise wait for orphan timeout (clients may still
+            // be draining output).
             loop {
-                interval.tick().await;
-                let Some(store) = weak.upgrade() else {
-                    break;
+                let Some(store) = store.upgrade() else { return };
+                let should_remove = {
+                    let sessions = store.sessions.read().unwrap();
+                    match sessions.get(&sid) {
+                        Some(s) => s.is_orphaned()
+                            || s.clients.load(Ordering::Relaxed) == 0,
+                        None => return,
+                    }
                 };
-                store.cleanup();
+                if should_remove {
+                    store.sessions.write().unwrap().remove(&sid);
+                    tracing::info!("removed dead session {sid}");
+                    return;
+                }
+                // Clients still attached — check again shortly
+                tokio::time::sleep(std::time::Duration::from_secs(1))
+                    .await;
             }
         });
 
-        store
-    }
-
-    pub fn insert(&self, session: Arc<Session>) -> String {
-        let id = uuid::Uuid::new_v4().to_string();
-        self.sessions.write().unwrap().insert(id.clone(), session);
         id
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<Session>> {
         self.sessions.read().unwrap().get(id).cloned()
-    }
-
-    fn cleanup(&self) {
-        let mut sessions = self.sessions.write().unwrap();
-        sessions.retain(|id, session| {
-            if !session.is_alive() {
-                tracing::info!("removing dead session {id}");
-                return false;
-            }
-            if session.is_orphaned() {
-                tracing::info!(
-                    "removing orphaned session {id} (no clients for {}s)",
-                    ORPHAN_TIMEOUT.as_secs()
-                );
-                return false;
-            }
-            true
-        });
     }
 }

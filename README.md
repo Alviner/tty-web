@@ -17,23 +17,41 @@ tty-web --address 127.0.0.1 --port 9090 --shell /bin/zsh
 
 ## Sessions
 
-Each WebSocket connection is backed by a persistent session. The PTY and shell
-process live independently of the WebSocket — closing a tab or losing
+Each WebSocket connection is backed by a persistent session (UUID v4). The PTY
+and shell process live independently of the WebSocket — closing a tab or losing
 connectivity does not kill the shell.
 
 **Reconnect** — the client stores the session ID in `sessionStorage` and passes
 it as `?sid=<uuid>` on reconnect. The server replays the scrollback buffer
-(last 64 KB of output) and then streams live output. From the user's
-perspective the terminal picks up where it left off.
+(last 64 KB of output) and then streams live output — no gaps. From the user's
+perspective the terminal picks up where it left off. Reconnection uses
+exponential backoff starting at 1 s up to a maximum of 5 s.
 
 **Share a session** — open a second tab with `?sid=<uuid>` in the page URL
-(e.g. `http://localhost:9090/?sid=...`). Both tabs see the same output and can
-send input. The session ID is printed to the browser console on connect.
+(e.g. `http://localhost:9090/?sid=...`). All tabs see the same output and can
+send input simultaneously. The session ID is printed to the browser console on
+connect.
 
 **Lifecycle** — a session is removed when:
 
-- the shell process exits (detected within 5 s), or
-- no client is attached for 5 minutes (orphan timeout).
+- the shell process exits and no clients are attached (immediately), or
+- the shell process exits while clients are still attached (as soon as the
+  last client disconnects), or
+- no client is attached for 1 minute (orphan timeout).
+
+### Wire protocol
+
+All WebSocket messages are binary frames. The first byte is the command, the
+rest is the payload.
+
+| Direction | Cmd | Payload | Description |
+|-----------|-----|---------|-------------|
+| client → server | `0x00` | raw bytes | Terminal input |
+| client → server | `0x01` | rows(u16 BE) + cols(u16 BE) | Resize |
+| server → client | `0x00` | raw bytes | Terminal output |
+| server → client | `0x10` | UUID string | Session ID |
+| server → client | `0x11` | raw bytes | Scrollback snapshot |
+| server → client | `0x12` | — | Shell exited |
 
 ## Build
 

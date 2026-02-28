@@ -2,6 +2,8 @@
 
 Web-based terminal emulator. Opens a real PTY in the browser over WebSocket.
 
+![demo](demo.gif)
+
 ## Usage
 
 ```bash

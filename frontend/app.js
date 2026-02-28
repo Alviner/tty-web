@@ -85,6 +85,21 @@ function main() {
 
   var readonly = new URLSearchParams(location.search).has("view");
 
+  var sbSid = document.getElementById("sb-sid");
+  var sbMode = document.getElementById("sb-mode");
+  var sbStatus = document.getElementById("sb-status");
+  var sbCopy = document.getElementById("sb-copy");
+  var sbView = document.getElementById("sb-view");
+  var currentSid = null;
+
+  sbMode.textContent = readonly ? "\uF06E view" : "\uF11C interactive";
+
+  var STATUS_ICONS = { green: "\uF00C", yellow: "\uF252", red: "\uF00D" };
+  function setStatus(label, color) {
+    sbStatus.innerHTML = '<span class="sb-' + color + '">' + (STATUS_ICONS[color] || "") + '</span> ' + label;
+  }
+  setStatus("connecting", "yellow");
+
   var ws = null;
   var reconnectDelay = RECONNECT_BASE_MS;
   var resizeSent = false;
@@ -120,6 +135,7 @@ function main() {
     ws.onopen = function () {
       reconnectDelay = RECONNECT_BASE_MS;
       resizeSent = false;
+      setStatus("connected", "green");
     };
 
     ws.onmessage = function (event) {
@@ -142,6 +158,10 @@ function main() {
             sendResize();
           }
           sessionStorage.setItem("tty-web-sid", newSid);
+          currentSid = newSid;
+          sbSid.textContent = "\uF489 " + newSid.substring(0, 8);
+          sbCopy.disabled = false;
+          sbView.disabled = false;
           break;
         case CMD_SCROLLBACK:
           console.log("[tty-web] scrollback:", payload.length, "bytes");
@@ -157,12 +177,14 @@ function main() {
           shellExited = true;
           sessionStorage.removeItem("tty-web-sid");
           term.write("\r\n\x1b[90m[Shell exited.]\x1b[0m\r\n");
+          setStatus("exited", "red");
           break;
       }
     };
 
     ws.onclose = function () {
       if (shellExited) return;
+      setStatus("reconnecting", "yellow");
       term.write(
         "\r\n\x1b[33m[Disconnected. Reconnecting in " +
           Math.round(reconnectDelay / 1000) +
@@ -207,6 +229,27 @@ function main() {
     fitAddon.fit();
   });
   resizeObserver.observe(document.getElementById("terminal"));
+
+  function flashButton(btn, original) {
+    btn.textContent = "Copied!";
+    setTimeout(function () { btn.textContent = original; }, 1500);
+  }
+
+  sbCopy.addEventListener("click", function () {
+    if (!currentSid) return;
+    var url = location.origin + "/?sid=" + currentSid;
+    navigator.clipboard.writeText(url).then(function () {
+      flashButton(sbCopy, "\uF0C1 Copy link");
+    });
+  });
+
+  sbView.addEventListener("click", function () {
+    if (!currentSid) return;
+    var url = location.origin + "/?sid=" + currentSid + "&view";
+    navigator.clipboard.writeText(url).then(function () {
+      flashButton(sbView, "\uF06E View link");
+    });
+  });
 
   connect();
 }

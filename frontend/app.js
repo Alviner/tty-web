@@ -90,6 +90,7 @@ function main() {
   var sbStatus = document.getElementById("sb-status");
   var sbCopy = document.getElementById("sb-copy");
   var sbView = document.getElementById("sb-view");
+  var sbNew = document.getElementById("sb-new");
   var currentSid = null;
 
   sbMode.textContent = readonly ? "\uF06E view" : "\uF11C interactive";
@@ -182,7 +183,13 @@ function main() {
       }
     };
 
-    ws.onclose = function () {
+    ws.onclose = function (ev) {
+      if (ev.code === 4404) {
+        sessionStorage.removeItem("tty-web-sid");
+        term.write("\r\n\x1b[90m[Session not found.]\x1b[0m\r\n");
+        setStatus("no session", "red");
+        return;
+      }
       if (shellExited) return;
       setStatus("reconnecting", "yellow");
       term.write(
@@ -249,6 +256,11 @@ function main() {
     navigator.clipboard.writeText(url).then(function () {
       flashButton(sbView, "\uF06E View link");
     });
+  });
+
+  sbNew.addEventListener("click", function () {
+    sessionStorage.removeItem("tty-web-sid");
+    location.href = location.origin + "/";
   });
 
   connect();

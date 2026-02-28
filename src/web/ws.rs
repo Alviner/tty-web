@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use tokio::sync::broadcast::error::RecvError;
@@ -9,6 +9,11 @@ use tokio::sync::broadcast::error::RecvError;
 use crate::session::Session;
 use crate::terminal::Terminal;
 use crate::web::AppState;
+
+enum ResolveError {
+    NotFound(String),
+    Io(std::io::Error),
+}
 
 // Client → Server
 const CMD_INPUT: u8 = 0x00;
@@ -36,9 +41,19 @@ async fn handle_socket(
     sid: Option<String>,
     readonly: bool,
 ) {
-    let (session, session_id) = match resolve_or_create(&state, sid) {
+    let (session, session_id) = match resolve_session(&state, sid.as_deref()) {
         Ok(result) => result,
-        Err(e) => {
+        Err(ResolveError::NotFound(id)) => {
+            tracing::warn!("session {id} not found");
+            let _ = socket
+                .send(Message::Close(Some(CloseFrame {
+                    code: 4404,
+                    reason: "session not found".into(),
+                })))
+                .await;
+            return;
+        }
+        Err(ResolveError::Io(e)) => {
             tracing::error!("failed to create session: {e}");
             return;
         }
@@ -137,17 +152,22 @@ async fn handle_socket(
     session.detach();
 }
 
-fn resolve_or_create(
+fn resolve_session(
     state: &AppState,
-    sid: Option<String>,
-) -> std::io::Result<(Arc<Session>, String)> {
-    if let Some(sid) = sid
-        && let Some(session) = state.sessions.get(&sid)
-    {
-        tracing::info!("reattaching to session {sid}");
-        return Ok((session, sid));
+    sid: Option<&str>,
+) -> Result<(Arc<Session>, String), ResolveError> {
+    if let Some(sid) = sid {
+        return state
+            .sessions
+            .get(sid)
+            .map(|session| {
+                tracing::info!("reattaching to session {sid}");
+                (session, sid.to_owned())
+            })
+            .ok_or_else(|| ResolveError::NotFound(sid.to_owned()));
     }
-    let (terminal, output_rx) = Terminal::spawn(&state.shell)?;
+    let (terminal, output_rx) =
+        Terminal::spawn(&state.shell).map_err(ResolveError::Io)?;
     let session = Session::new(terminal, output_rx);
     let id = state.sessions.insert(session.clone());
     tracing::info!("created new session {id}");

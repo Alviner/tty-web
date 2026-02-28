@@ -10,7 +10,7 @@ use crate::terminal::Terminal;
 
 const SCROLLBACK_LIMIT: usize = 64 * 1024;
 const ORPHAN_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(300);
+    std::time::Duration::from_secs(60);
 
 pub struct Session {
     pub terminal: Terminal,
@@ -110,35 +110,33 @@ impl SessionStore {
             .unwrap()
             .insert(id.clone(), session.clone());
 
-        // Reaper task: waits for shell exit, then orphan timeout
+        // Reaper task: periodically checks for removal conditions
         let store = Arc::downgrade(self);
         let sid = id.clone();
-        let mut closed_rx = session.terminal.closed();
+        let closed_rx = session.terminal.closed();
         tokio::spawn(async move {
-            // Wait for shell to exit
-            let _ = closed_rx.changed().await;
-
-            // Shell is dead — if no clients, remove immediately.
-            // Otherwise wait for orphan timeout (clients may still
-            // be draining output).
             loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1))
+                    .await;
                 let Some(store) = store.upgrade() else { return };
                 let should_remove = {
                     let sessions = store.sessions.read().unwrap();
                     match sessions.get(&sid) {
-                        Some(s) => s.is_orphaned()
-                            || s.clients.load(Ordering::Relaxed) == 0,
+                        Some(s) => {
+                            s.is_orphaned()
+                                || (*closed_rx.borrow()
+                                    && s.clients
+                                        .load(Ordering::Relaxed)
+                                        == 0)
+                        }
                         None => return,
                     }
                 };
                 if should_remove {
                     store.sessions.write().unwrap().remove(&sid);
-                    tracing::info!("removed dead session {sid}");
+                    tracing::info!("removed session {sid}");
                     return;
                 }
-                // Clients still attached — check again shortly
-                tokio::time::sleep(std::time::Duration::from_secs(1))
-                    .await;
             }
         });
 

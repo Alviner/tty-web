@@ -32,6 +32,11 @@ exponential backoff starting at 1 s up to a maximum of 5 s.
 send input simultaneously. The session ID is printed to the browser console on
 connect.
 
+**View mode** — append `&view` to a session URL
+(e.g. `http://localhost:9090/?sid=<uuid>&view`) to connect as a read-only
+observer. The terminal output is visible but all keyboard input and resize
+events are ignored. Useful for demos, monitoring, and pair-programming.
+
 **Lifecycle** — a session is removed when:
 
 - the shell process exits and no clients are attached (immediately), or

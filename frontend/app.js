@@ -83,6 +83,8 @@ function main() {
     return ranges;
   });
 
+  var readonly = new URLSearchParams(location.search).has("view");
+
   var ws = null;
   var reconnectDelay = RECONNECT_BASE_MS;
   var resizeSent = false;
@@ -90,6 +92,7 @@ function main() {
   var replaying = false;
 
   function sendResize() {
+    if (readonly) return;
     if (!resizeSent && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(buildResizeFrame(term.rows, term.cols));
       resizeSent = true;
@@ -107,6 +110,9 @@ function main() {
     var sid = getSid();
     if (sid) {
       wsUrl += "?sid=" + encodeURIComponent(sid);
+    }
+    if (readonly) {
+      wsUrl += (sid ? "&" : "?") + "view";
     }
     ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
@@ -173,14 +179,14 @@ function main() {
   }
 
   term.onData(function (data) {
-    if (replaying) return;
+    if (readonly || replaying) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(buildInputFrame(data));
     }
   });
 
   term.onBinary(function (data) {
-    if (replaying) return;
+    if (readonly || replaying) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
       var bytes = new Uint8Array(data.length);
       for (var i = 0; i < data.length; i++) {
@@ -191,6 +197,7 @@ function main() {
   });
 
   term.onResize(function (size) {
+    if (readonly) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(buildResizeFrame(size.rows, size.cols));
     }

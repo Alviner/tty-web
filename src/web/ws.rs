@@ -26,13 +26,15 @@ pub async fn ws_handler(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     let sid = params.get("sid").cloned();
-    ws.on_upgrade(move |socket| handle_socket(socket, state, sid))
+    let readonly = params.contains_key("view");
+    ws.on_upgrade(move |socket| handle_socket(socket, state, sid, readonly))
 }
 
 async fn handle_socket(
     mut socket: WebSocket,
     state: AppState,
     sid: Option<String>,
+    readonly: bool,
 ) {
     let (session, session_id) = match resolve_or_create(&state, sid) {
         Ok(result) => result,
@@ -100,7 +102,7 @@ async fn handle_socket(
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Binary(data))) => {
-                        if data.is_empty() {
+                        if readonly || data.is_empty() {
                             continue;
                         }
                         handle_client_message(

@@ -1135,7 +1135,7 @@ dependencies = [
 
 [[package]]
 name = "tty-web"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "clap",

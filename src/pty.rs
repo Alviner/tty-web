@@ -50,8 +50,8 @@ impl PtyMaster {
         };
 
         // Set master fd to non-blocking for async I/O
-        let flags = fcntl::fcntl(&pty.master, fcntl::FcntlArg::F_GETFL)
-            .map_err(std::io::Error::other)?;
+        let flags =
+            fcntl::fcntl(&pty.master, fcntl::FcntlArg::F_GETFL).map_err(std::io::Error::other)?;
         let mut flags = fcntl::OFlag::from_bits_truncate(flags);
         flags.insert(fcntl::OFlag::O_NONBLOCK);
         fcntl::fcntl(&pty.master, fcntl::FcntlArg::F_SETFL(flags))
@@ -105,8 +105,7 @@ mod tests {
     #[test]
     fn test_set_window_size() {
         let mut pty = PtyMaster::spawn("/bin/sh").expect("spawn /bin/sh");
-        set_window_size(&pty.master, 40, 120)
-            .expect("set_window_size should succeed");
+        set_window_size(&pty.master, 40, 120).expect("set_window_size should succeed");
         let _ = pty.child.kill();
         let _ = pty.child.wait();
     }

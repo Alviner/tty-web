@@ -22,9 +22,7 @@ async fn main() {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                EnvFilter::new(&config.log_level)
-            }),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level)),
         )
         .init();
 
@@ -50,10 +48,8 @@ async fn main() {
 
 async fn shutdown_signal() {
     let ctrl_c = tokio::signal::ctrl_c();
-    let mut sigterm = tokio::signal::unix::signal(
-        tokio::signal::unix::SignalKind::terminate(),
-    )
-    .expect("failed to install SIGTERM handler");
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("failed to install SIGTERM handler");
 
     tokio::select! {
         _ = ctrl_c => {

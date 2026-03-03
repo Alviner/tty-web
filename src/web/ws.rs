@@ -102,11 +102,7 @@ async fn handle_socket(
         let mut sb_frame = Vec::with_capacity(1 + scrollback.len());
         sb_frame.push(CMD_SCROLLBACK);
         sb_frame.extend_from_slice(&scrollback);
-        if socket
-            .send(Message::Binary(sb_frame.into()))
-            .await
-            .is_err()
-        {
+        if socket.send(Message::Binary(sb_frame.into())).await.is_err() {
             session.detach();
             return;
         }
@@ -189,8 +185,7 @@ fn resolve_session(
             })
             .ok_or_else(|| ResolveError::NotFound(sid.to_owned()));
     }
-    let (terminal, output_rx) =
-        Terminal::spawn(&state.shell).map_err(ResolveError::Io)?;
+    let (terminal, output_rx) = Terminal::spawn(&state.shell).map_err(ResolveError::Io)?;
     let session = Session::new(terminal, output_rx);
     let id = state.sessions.insert(session.clone());
     tracing::info!("created new session {id}");

@@ -9,9 +9,15 @@ closing a tab or losing connectivity does not kill the shell.
 On first connect the server assigns a UUID and the client updates the browser
 URL to `/?sid=<uuid>` via `history.replaceState`. On reconnect the client
 reads `sid` from the URL and passes it as a query parameter. The server
-replays the scrollback buffer (last 64 KB of output) and then streams live
-output — no gaps. From the user's perspective the terminal picks up where it
-left off.
+replays the scrollback buffer and then streams live output — no gaps. From the
+user's perspective the terminal picks up where it left off.
+
+The scrollback buffer defaults to **256 KiB** and can be changed with
+`--scrollback-limit` (in KiB). The buffer stores an event log of output chunks
+and window-size changes. When the byte budget is exceeded, entire events are
+evicted from the front — escape sequences are never split mid-stream. On
+reconnect the server replays the event log as regular `Output` and
+`WindowSize` protocol frames followed by a `ReplayEnd` marker.
 
 Reconnection uses exponential backoff starting at 1 s up to a maximum of 5 s.
 
@@ -35,6 +41,10 @@ http://localhost:9090/?sid=<uuid>&view
 ```
 
 Terminal output is visible but all keyboard input and resize events are ignored.
+The viewer's terminal automatically matches the interactive client's window
+size — when the interactive client resizes, all viewers receive the updated
+dimensions via the `0x13` (Window size) protocol command.
+
 Useful for demos, monitoring, and pair-programming.
 
 ## Lifecycle

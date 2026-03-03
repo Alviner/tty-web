@@ -8,8 +8,8 @@ over WebSocket.
 ## Features
 
 - Real PTY with full job control and signals
-- [Persistent sessions](./sessions.md) with scrollback replay
-- [Session sharing and view mode](./sessions.md#share-a-session)
+- [Persistent sessions](./sessions.md) with configurable scrollback replay
+- [Session sharing and view mode](./sessions.md#share-a-session) with window size sync
 - [Lightweight binary protocol](./wire-protocol.md)
 - Single static binary (frontend embedded via `rust-embed`)
 - Multi-arch Docker images (`amd64` / `arm64`)

@@ -7,9 +7,9 @@ const CMD_RESIZE = 0x01;
 
 const CMD_OUTPUT = 0x00;
 const CMD_SESSION_ID = 0x10;
-const CMD_SCROLLBACK = 0x11;
 const CMD_SHELL_EXIT = 0x12;
 const CMD_WINDOW_SIZE = 0x13;
+const CMD_REPLAY_END = 0x14;
 
 // WebSocket close codes (4000–4999: application-specific)
 const CLOSE_SESSION_NOT_FOUND = 4404;
@@ -204,24 +204,18 @@ const connect = (ctx) => {
           const isReattach = newSid === currentSid;
           wsLog = log.child({ sid: newSid.substring(0, 8) });
           wsLog.info("session", isReattach ? "(reattach)" : "(new)");
-          if (!isReattach) {
-            term.reset();
-            sendResize();
-          }
+          replaying = true;
+          term.reset();
           currentSid = newSid;
           history.replaceState(null, "", `/?sid=${newSid}${readonly ? "&view" : ""}`);
           statusBar.setSid(newSid);
           break;
         }
-        case CMD_SCROLLBACK:
-          wsLog.info("scrollback:", payload.length, "bytes");
-          replaying = true;
-          term.reset();
-          term.write(payload, () => {
-            term.write("\x1b[?25h");
-            replaying = false;
-            sendResize();
-          });
+        case CMD_REPLAY_END:
+          wsLog.info("replay end");
+          replaying = false;
+          term.write("\x1b[?25h");
+          sendResize();
           break;
         case CMD_WINDOW_SIZE:
           if (readonly && payload.length >= 4) {

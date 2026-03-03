@@ -12,8 +12,9 @@ the rest is the payload.
 | client → server | `0x01` | rows(u16 BE) + cols(u16 BE) | Resize |
 | server → client | `0x00` | raw bytes | Terminal output |
 | server → client | `0x10` | UUID string | Session ID |
-| server → client | `0x11` | raw bytes | Scrollback snapshot |
 | server → client | `0x12` | — | Shell exited |
+| server → client | `0x13` | rows(u16 BE) + cols(u16 BE) | Window size |
+| server → client | `0x14` | — | Replay end |
 
 ## Close codes
 
@@ -31,11 +32,16 @@ sequenceDiagram
     C->>S: WS connect (?sid, view)
     Note right of S: resolve / create session
     S->>C: 0x10 Session ID
-    S-->>C: 0x11 Scrollback (if non-empty)
+    S->>C: 0x13 Window size
+    Note over C,S: replay
+    S-->>C: 0x00 Output (scrollback)
+    S-->>C: 0x13 Window size (scrollback)
+    S->>C: 0x14 Replay end
     Note over C,S: streaming
     S->>C: 0x00 Output
     C->>S: 0x00 Input
     C->>S: 0x01 Resize
+    S->>C: 0x13 Window size (broadcast to viewers)
     S->>C: 0x00 Output
     S->>C: 0x12 Shell exited
     Note over C,S: connection closed
@@ -45,11 +51,20 @@ sequenceDiagram
    and an optional `view` flag.
 2. The server resolves an existing session or creates a new one. If `sid` is
    provided but not found, the connection is closed with code **4404**.
-3. The server sends `0x10` with the session UUID.
-4. If the scrollback buffer is non-empty, the server sends `0x11` with the
-   buffered output. The subscription is established atomically so no messages
-   are lost between the snapshot and live streaming.
-5. The main loop begins: output is forwarded as `0x00` frames, input and resize
+3. The server sends `0x10` with the session UUID. The client enters replay
+   mode (input suppressed, terminal reset).
+4. The server sends `0x13` with the current PTY window size. View-mode clients
+   use this to match their terminal dimensions to the interactive session
+   **before** scrollback replay.
+5. The server replays the scrollback event log as a sequence of `0x00` (output)
+   and `0x13` (window size) frames — one per stored event. The subscription
+   is established atomically so no messages are lost between the replay and
+   live streaming.
+6. The server sends `0x14` (replay end). The client exits replay mode, shows
+   the cursor, and sends its initial resize.
+7. The main loop begins: output is forwarded as `0x00` frames, input and resize
    commands are read from the client. In view mode, client input is ignored.
-6. When the shell process exits, the server sends `0x12` and the connection
+8. When an interactive client sends a resize (`0x01`), the server updates the
+   PTY and broadcasts `0x13` to all connected clients.
+9. When the shell process exits, the server sends `0x12` and the connection
    closes.

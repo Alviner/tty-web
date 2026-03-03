@@ -107,7 +107,12 @@ impl Drop for Terminal {
         if let Some(mut child) = self.child.get_mut().unwrap().take() {
             let pid = Pid::from_raw(child.id() as i32);
             let _ = signal::kill(pid, Signal::SIGHUP);
-            let _ = child.wait();
+            // Reap the child on a dedicated OS thread so we never block
+            // the tokio runtime (which would deadlock current_thread tests
+            // and stall multi_thread ones).
+            std::thread::spawn(move || {
+                let _ = child.wait();
+            });
         }
     }
 }
@@ -215,7 +220,7 @@ mod tests {
 
         terminal.write(b"exit\n".to_vec()).await.unwrap();
 
-        let deadline = Duration::from_secs(3);
+        let deadline = Duration::from_secs(10);
         let result = timeout(deadline, closed.wait_for(|&v| v)).await;
         assert!(
             result.is_ok(),

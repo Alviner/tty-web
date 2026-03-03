@@ -31,7 +31,12 @@ pub struct AppState {
 }
 
 /// Build the Axum router with all routes and shared state.
-pub fn router(shell: String, pwd: Option<PathBuf>, scrollback_limit: usize, sessions: Arc<SessionStore>) -> Router {
+pub fn router(
+    shell: String,
+    pwd: Option<PathBuf>,
+    scrollback_limit: usize,
+    sessions: Arc<SessionStore>,
+) -> Router {
     let state = AppState {
         shell,
         pwd,

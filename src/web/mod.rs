@@ -30,7 +30,11 @@ pub struct AppState {
 
 /// Build the Axum router with all routes and shared state.
 pub fn router(shell: String, pwd: Option<PathBuf>, sessions: Arc<SessionStore>) -> Router {
-    let state = AppState { shell, pwd, sessions };
+    let state = AppState {
+        shell,
+        pwd,
+        sessions,
+    };
     Router::new()
         .route("/ws", get(ws::ws_handler))
         .route("/api/v1/ping", get(health::ping))

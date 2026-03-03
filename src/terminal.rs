@@ -37,7 +37,10 @@ impl Terminal {
     /// receiver.
     ///
     /// If `pwd` is provided, the shell starts in that directory.
-    pub fn spawn(shell: &str, pwd: Option<&Path>) -> std::io::Result<(Self, broadcast::Receiver<Vec<u8>>)> {
+    pub fn spawn(
+        shell: &str,
+        pwd: Option<&Path>,
+    ) -> std::io::Result<(Self, broadcast::Receiver<Vec<u8>>)> {
         let PtyMaster { master, mut child } = PtyMaster::spawn(shell, pwd)?;
 
         let async_fd = match AsyncFd::with_interest(master, Interest::READABLE | Interest::WRITABLE)

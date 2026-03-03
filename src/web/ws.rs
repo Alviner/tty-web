@@ -185,7 +185,8 @@ fn resolve_session(
             })
             .ok_or_else(|| ResolveError::NotFound(sid.to_owned()));
     }
-    let (terminal, output_rx) = Terminal::spawn(&state.shell).map_err(ResolveError::Io)?;
+    let (terminal, output_rx) =
+        Terminal::spawn(&state.shell, state.pwd.as_deref()).map_err(ResolveError::Io)?;
     let session = Session::new(terminal, output_rx);
     let id = state.sessions.insert(session.clone());
     tracing::info!("created new session {id}");

@@ -19,6 +19,7 @@ Every flag can also be set via an environment variable.
 | `--shell` | `TTY_WEB_SHELL` | `/bin/bash` | Shell to spawn |
 | `--log-level` | `TTY_WEB_LOG_LEVEL` | `info` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |
 | `--log-format` | `TTY_WEB_LOG_FORMAT` | `text` | Log output format (`text`, `json`) |
+| `--pwd` | `TTY_WEB_PWD` | *inherited* | Working directory for new shell sessions |
 
 ## Docker
 

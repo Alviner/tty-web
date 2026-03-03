@@ -1,6 +1,7 @@
 //! CLI configuration parsed from flags and environment variables.
 
 use std::net::IpAddr;
+use std::path::PathBuf;
 
 use clap::{Parser, ValueEnum};
 
@@ -39,6 +40,10 @@ pub struct Config {
     /// Log output format
     #[arg(long, default_value = "text", env = "TTY_WEB_LOG_FORMAT")]
     pub log_format: LogFormat,
+
+    /// Working directory for new shell sessions
+    #[arg(long, env = "TTY_WEB_PWD")]
+    pub pwd: Option<PathBuf>,
 }
 
 #[cfg(test)]
@@ -53,6 +58,7 @@ mod tests {
         assert_eq!(config.shell, "/bin/bash");
         assert_eq!(config.log_level, "info");
         assert_eq!(config.log_format, LogFormat::Text);
+        assert_eq!(config.pwd, None);
     }
 
     #[test]
@@ -75,5 +81,11 @@ mod tests {
         assert_eq!(config.shell, "/bin/sh");
         assert_eq!(config.log_level, "debug");
         assert_eq!(config.log_format, LogFormat::Json);
+    }
+
+    #[test]
+    fn test_pwd_flag() {
+        let config = Config::parse_from(["tty-web", "--pwd", "/tmp"]);
+        assert_eq!(config.pwd, Some(PathBuf::from("/tmp")));
     }
 }

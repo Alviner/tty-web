@@ -166,7 +166,7 @@ mod tests {
     use super::*;
 
     fn spawn_session() -> Arc<Session> {
-        let (terminal, output_rx) = Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        let (terminal, output_rx) = Terminal::spawn("/bin/sh", None).expect("spawn /bin/sh");
         Session::new(terminal, output_rx)
     }
 

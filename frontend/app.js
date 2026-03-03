@@ -98,6 +98,7 @@ const createTerminal = () => {
     allowProposedApi: true,
     fontFamily: "'LigaHack Nerd Font', monospace",
     fontSize: 14,
+    cursorBlink: true,
     theme: {
       background: "#1a1b26",
       foreground: "#c0caf5",
@@ -213,9 +214,11 @@ const connect = (ctx) => {
         }
         case CMD_REPLAY_END:
           wsLog.info("replay end");
-          replaying = false;
-          term.write("\x1b[?25h");
-          sendResize();
+          term.write("", () => {
+            replaying = false;
+            term.write("\x1b[?25h");
+            sendResize();
+          });
           break;
         case CMD_WINDOW_SIZE:
           if (readonly && payload.length >= 4) {

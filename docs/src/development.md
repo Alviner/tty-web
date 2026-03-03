@@ -19,7 +19,8 @@ All available Make targets:
 | `fmt` | Format code with `cargo fmt` |
 | `lint` | Lint with `cargo clippy -- -D warnings` |
 | `check` | `cargo check` |
-| `docker` | Build release binary and Docker image |
+| `docker` | Build release binary and playground Docker image |
+| `docker-minimal` | Build release binary and minimal (scratch) Docker image |
 | `docs` | Build mdbook + cargo doc into `docs/book/` |
 | `docs-serve` | Serve docs locally with live reload |
 

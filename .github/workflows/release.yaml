@@ -103,9 +103,19 @@ jobs:
           - platform: linux/amd64
             runner: ubuntu-latest
             target: x86_64-unknown-linux-musl
+            variant: minimal
+          - platform: linux/amd64
+            runner: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            variant: playground
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
+            variant: minimal
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            variant: playground
 
     runs-on: ${{ matrix.runner }}
 
@@ -138,8 +148,9 @@ jobs:
 
       - name: Build and push
         run: |
-          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-${PLATFORM_PAIR}"
+          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-${{ matrix.variant }}-${PLATFORM_PAIR}"
           docker build \
+            --target ${{ matrix.variant }} \
             --cache-from "${{ env.IMAGE_NAME }}:latest" \
             --build-arg BINARY=target/${{ matrix.target }}/release/tty-web \
             -t "${IMAGE}" .
@@ -148,14 +159,14 @@ jobs:
       - name: Export digest
         run: |
           mkdir -p ${{ runner.temp }}/digests
-          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-${PLATFORM_PAIR}"
+          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-${{ matrix.variant }}-${PLATFORM_PAIR}"
           digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}" | cut -d@ -f2)
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
       - name: Upload digest
         uses: actions/upload-artifact@v7
         with:
-          name: digests-${{ env.PLATFORM_PAIR }}
+          name: digests-${{ matrix.variant }}-${{ env.PLATFORM_PAIR }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -164,6 +175,18 @@ jobs:
     needs: [prepare, build-image]
     if: needs.prepare.outputs.created == 'true'
     runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        include:
+          - variant: minimal
+            tags: |
+              type=raw,value=${{ needs.prepare.outputs.version }}
+              type=raw,value=latest
+          - variant: playground
+            tags: |
+              type=raw,value=${{ needs.prepare.outputs.version }}-playground
+              type=raw,value=playground
 
     permissions:
       contents: read
@@ -178,7 +201,7 @@ jobs:
       - name: Download digests
         uses: actions/download-artifact@v8
         with:
-          pattern: digests-*
+          pattern: digests-${{ matrix.variant }}-*
           path: ${{ runner.temp }}/digests
           merge-multiple: true
 
@@ -197,9 +220,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ needs.prepare.outputs.version }}
-            type=raw,value=latest
+          tags: ${{ matrix.tags }}
 
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests

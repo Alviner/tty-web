@@ -12,4 +12,4 @@ over WebSocket.
 - [Session sharing and view mode](./sessions.md#share-a-session) with window size sync
 - [Lightweight binary protocol](./wire-protocol.md)
 - Single static binary (frontend embedded via `rust-embed`)
-- Multi-arch Docker images (`amd64` / `arm64`)
+- Multi-arch Docker images (`amd64` / `arm64`) — minimal scratch and playground variants

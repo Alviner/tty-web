@@ -133,10 +133,16 @@ jobs:
       - name: Log in to the Container registry
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
+      - name: Pull previous image for layer cache
+        run: docker pull "${{ env.IMAGE_NAME }}:latest" || true
+
       - name: Build and push
         run: |
           IMAGE="${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-${PLATFORM_PAIR}"
-          docker build --build-arg BINARY=target/${{ matrix.target }}/release/tty-web -t "${IMAGE}" .
+          docker build \
+            --cache-from "${{ env.IMAGE_NAME }}:latest" \
+            --build-arg BINARY=target/${{ matrix.target }}/release/tty-web \
+            -t "${IMAGE}" .
           docker push "${IMAGE}"
 
       - name: Export digest
@@ -216,41 +222,8 @@ jobs:
           subject-digest: ${{ steps.inspect.outputs.digest }}
           push-to-registry: true
 
-  release:
-    needs: [prepare, build-binary, merge]
-    if: needs.prepare.outputs.created == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Download all binaries
-        uses: actions/download-artifact@v8
-        with:
-          pattern: binary-*
-          path: ${{ runner.temp }}/binaries
-          merge-multiple: true
-
-      - name: Generate checksums
-        working-directory: ${{ runner.temp }}/binaries
-        run: sha256sum *.tar.gz > checksums-sha256.txt
-
-      - name: Create GitHub Release
-        run: |
-          gh release create "${{ needs.prepare.outputs.tag }}" \
-            --title "tty-web ${{ needs.prepare.outputs.tag }}" \
-            --generate-notes \
-            ${{ runner.temp }}/binaries/*.tar.gz \
-            ${{ runner.temp }}/binaries/checksums-sha256.txt
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   docs:
-    needs: [prepare, release]
+    needs: prepare
     if: needs.prepare.outputs.created == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -283,3 +256,36 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  release:
+    needs: [prepare, build-binary, merge, docs]
+    if: needs.prepare.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Download all binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: binary-*
+          path: ${{ runner.temp }}/binaries
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: ${{ runner.temp }}/binaries
+        run: sha256sum *.tar.gz > checksums-sha256.txt
+
+      - name: Create GitHub Release
+        run: |
+          gh release create "${{ needs.prepare.outputs.tag }}" \
+            --title "tty-web ${{ needs.prepare.outputs.tag }}" \
+            --generate-notes \
+            ${{ runner.temp }}/binaries/*.tar.gz \
+            ${{ runner.temp }}/binaries/checksums-sha256.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

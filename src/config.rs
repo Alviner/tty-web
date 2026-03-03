@@ -2,7 +2,16 @@
 
 use std::net::IpAddr;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+
+/// Log output format.
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogFormat {
+    /// Human-readable text (default)
+    Text,
+    /// Structured JSON, one object per line
+    Json,
+}
 
 /// Application configuration.
 ///
@@ -26,6 +35,10 @@ pub struct Config {
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, default_value = "info", env = "TTY_WEB_LOG_LEVEL")]
     pub log_level: String,
+
+    /// Log output format
+    #[arg(long, default_value = "text", env = "TTY_WEB_LOG_FORMAT")]
+    pub log_format: LogFormat,
 }
 
 #[cfg(test)]
@@ -39,6 +52,7 @@ mod tests {
         assert_eq!(config.port, 9090);
         assert_eq!(config.shell, "/bin/bash");
         assert_eq!(config.log_level, "info");
+        assert_eq!(config.log_format, LogFormat::Text);
     }
 
     #[test]
@@ -53,10 +67,13 @@ mod tests {
             "0.0.0.0",
             "--log-level",
             "debug",
+            "--log-format",
+            "json",
         ]);
         assert_eq!(config.address, "0.0.0.0".parse::<IpAddr>().unwrap());
         assert_eq!(config.port, 8080);
         assert_eq!(config.shell, "/bin/sh");
         assert_eq!(config.log_level, "debug");
+        assert_eq!(config.log_format, LogFormat::Json);
     }
 }

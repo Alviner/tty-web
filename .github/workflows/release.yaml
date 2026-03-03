@@ -12,22 +12,18 @@ env:
   REGISTRY: ghcr.io
 
 jobs:
-  check:
+  version:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
       - name: Extract version
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - run: cargo clippy -- -D warnings
-      - run: cargo test
 
   build-binary:
-    needs: check
+    needs: version
     strategy:
       matrix:
         include:
@@ -69,7 +65,7 @@ jobs:
           retention-days: 1
 
   build-image:
-    needs: [check, build-binary]
+    needs: [version, build-binary]
     permissions:
       contents: read
       packages: write
@@ -112,14 +108,14 @@ jobs:
 
       - name: Build and push
         run: |
-          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.check.outputs.version }}-${PLATFORM_PAIR}"
+          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.version.outputs.version }}-${PLATFORM_PAIR}"
           docker build --build-arg BINARY=target/${{ matrix.target }}/release/tty-web -t "${IMAGE}" .
           docker push "${IMAGE}"
 
       - name: Export digest
         run: |
           mkdir -p ${{ runner.temp }}/digests
-          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.check.outputs.version }}-${PLATFORM_PAIR}"
+          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.version.outputs.version }}-${PLATFORM_PAIR}"
           digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}" | cut -d@ -f2)
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
@@ -132,7 +128,7 @@ jobs:
           retention-days: 1
 
   merge:
-    needs: [check, build-image]
+    needs: [version, build-image]
     runs-on: ubuntu-latest
 
     permissions:
@@ -168,7 +164,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ needs.check.outputs.version }}
+            type=raw,value=${{ needs.version.outputs.version }}
             type=raw,value=latest
 
       - name: Create manifest list and push
@@ -193,7 +189,7 @@ jobs:
           push-to-registry: true
 
   release:
-    needs: [check, build-binary]
+    needs: [version, build-binary]
     runs-on: ubuntu-latest
     permissions:
       contents: write

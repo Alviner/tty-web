@@ -1,7 +1,7 @@
 //! Persistent terminal sessions with scrollback and lifecycle management.
 //!
 //! A [`Session`] wraps a [`Terminal`] and adds:
-//! - a 64 KB ring-buffer of recent output (scrollback),
+//! - a configurable ring-buffer of recent output (scrollback, default 256 KiB),
 //! - client attach/detach tracking,
 //! - orphan detection (no clients for 60 s → auto-remove).
 //!
@@ -14,14 +14,42 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Instant;
 
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::terminal::Terminal;
 
-/// Maximum scrollback buffer size in bytes.
-const SCROLLBACK_LIMIT: usize = 64 * 1024;
 /// Time without any attached clients before a session is reaped.
 const ORPHAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Return type of [`Session::attach`]: scrollback events, output stream,
+/// and window-size watch.
+pub type AttachResult = (
+    Vec<ScrollbackEvent>,
+    broadcast::Receiver<Vec<u8>>,
+    watch::Receiver<(u16, u16)>,
+);
+
+/// A scrollback event — either terminal output or a window-size change.
+///
+/// Storing events instead of raw bytes ensures that eviction never splits
+/// an escape sequence and that resize history is preserved for replay.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ScrollbackEvent {
+    /// Raw terminal output bytes.
+    Output(Vec<u8>),
+    /// PTY window size changed (rows, cols).
+    WindowSize(u16, u16),
+}
+
+impl ScrollbackEvent {
+    /// Logical byte cost used for eviction accounting.
+    fn byte_cost(&self) -> usize {
+        match self {
+            Self::Output(data) => data.len(),
+            Self::WindowSize(_, _) => 4,
+        }
+    }
+}
 
 /// A persistent terminal session.
 ///
@@ -29,19 +57,30 @@ const ORPHAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 /// and detects when the session becomes orphaned.
 pub struct Session {
     pub terminal: Terminal,
-    scrollback: Mutex<VecDeque<u8>>,
+    scrollback: Mutex<VecDeque<ScrollbackEvent>>,
+    scrollback_bytes: Mutex<usize>,
+    scrollback_limit: usize,
     clients: AtomicUsize,
     detached_at: Mutex<Option<Instant>>,
+    window_size: watch::Sender<(u16, u16)>,
 }
 
 impl Session {
     /// Create a new session and spawn a background scrollback collector task.
-    pub fn new(terminal: Terminal, output_rx: broadcast::Receiver<Vec<u8>>) -> Arc<Self> {
+    pub fn new(
+        terminal: Terminal,
+        output_rx: broadcast::Receiver<Vec<u8>>,
+        scrollback_limit: usize,
+    ) -> Arc<Self> {
+        let (ws_tx, _) = watch::channel((24, 80));
         let session = Arc::new(Self {
             terminal,
-            scrollback: Mutex::new(VecDeque::with_capacity(SCROLLBACK_LIMIT)),
+            scrollback: Mutex::new(VecDeque::new()),
+            scrollback_bytes: Mutex::new(0),
+            scrollback_limit,
             clients: AtomicUsize::new(0),
             detached_at: Mutex::new(None),
+            window_size: ws_tx,
         });
 
         // Scrollback collector
@@ -54,13 +93,7 @@ impl Session {
                         let Some(s) = weak.upgrade() else {
                             break;
                         };
-                        let mut sb = s.scrollback.lock().unwrap();
-                        for &byte in &data {
-                            if sb.len() >= SCROLLBACK_LIMIT {
-                                sb.pop_front();
-                            }
-                            sb.push_back(byte);
-                        }
+                        s.push_scrollback(ScrollbackEvent::Output(data));
                     }
                     Err(broadcast::error::RecvError::Lagged(_)) => {
                         continue;
@@ -73,16 +106,41 @@ impl Session {
         session
     }
 
+    /// Push an event into the scrollback ring buffer, evicting old events
+    /// when the byte budget is exceeded.
+    fn push_scrollback(&self, event: ScrollbackEvent) {
+        let cost = event.byte_cost();
+        let mut sb = self.scrollback.lock().unwrap();
+        let mut bytes = self.scrollback_bytes.lock().unwrap();
+        *bytes += cost;
+        sb.push_back(event);
+        while *bytes > self.scrollback_limit {
+            if let Some(old) = sb.pop_front() {
+                *bytes -= old.byte_cost();
+            } else {
+                break;
+            }
+        }
+    }
+
     /// Attach a client: increment the counter, subscribe to live output, and
-    /// return a scrollback snapshot. The subscription and snapshot are taken
+    /// return the scrollback event log. The subscription and snapshot are taken
     /// under the same lock so no output is lost.
-    pub fn attach(&self) -> (Vec<u8>, broadcast::Receiver<Vec<u8>>) {
+    pub fn attach(&self) -> AttachResult {
         self.clients.fetch_add(1, Ordering::Relaxed);
         *self.detached_at.lock().unwrap() = None;
         let sb = self.scrollback.lock().unwrap();
         let rx = self.terminal.subscribe();
-        let snapshot = sb.iter().copied().collect();
-        (snapshot, rx)
+        let ws_rx = self.window_size.subscribe();
+        let events: Vec<ScrollbackEvent> = sb.iter().cloned().collect();
+        (events, rx, ws_rx)
+    }
+
+    /// Update the current PTY window size (broadcast to viewers) and record
+    /// the resize in the scrollback log so replay clients see it too.
+    pub fn set_window_size(&self, rows: u16, cols: u16) {
+        let _ = self.window_size.send((rows, cols));
+        self.push_scrollback(ScrollbackEvent::WindowSize(rows, cols));
     }
 
     /// Detach a client. When the last client detaches, the orphan timer starts.
@@ -93,13 +151,12 @@ impl Session {
     }
 
     fn is_orphaned(&self) -> bool {
-        if self.clients.load(Ordering::Relaxed) > 0 {
-            return false;
-        }
-        match *self.detached_at.lock().unwrap() {
-            Some(t) => t.elapsed() >= ORPHAN_TIMEOUT,
-            None => false,
-        }
+        self.clients.load(Ordering::Relaxed) == 0
+            && self
+                .detached_at
+                .lock()
+                .unwrap()
+                .is_some_and(|t| t.elapsed() >= ORPHAN_TIMEOUT)
     }
 }
 
@@ -165,19 +222,21 @@ impl SessionStore {
 mod tests {
     use super::*;
 
+    const TEST_SCROLLBACK_LIMIT: usize = 256 * 1024;
+
     fn spawn_session() -> Arc<Session> {
         let (terminal, output_rx) = Terminal::spawn("/bin/sh", None).expect("spawn /bin/sh");
-        Session::new(terminal, output_rx)
+        Session::new(terminal, output_rx, TEST_SCROLLBACK_LIMIT)
     }
 
     #[tokio::test]
     async fn test_attach_detach_clients() {
         let session = spawn_session();
 
-        let (_sb1, _rx1) = session.attach();
+        let (_sb1, _rx1, _ws1) = session.attach();
         assert_eq!(session.clients.load(Ordering::Relaxed), 1);
 
-        let (_sb2, _rx2) = session.attach();
+        let (_sb2, _rx2, _ws2) = session.attach();
         assert_eq!(session.clients.load(Ordering::Relaxed), 2);
 
         session.detach();
@@ -187,25 +246,23 @@ mod tests {
     #[tokio::test]
     async fn test_not_orphaned_with_clients() {
         let session = spawn_session();
-        let (_sb, _rx) = session.attach();
+        let (_sb, _rx, _ws) = session.attach();
         assert!(!session.is_orphaned());
     }
 
     #[tokio::test]
     async fn test_not_orphaned_immediately_after_detach() {
         let session = spawn_session();
-        let (_sb, _rx) = session.attach();
+        let (_sb, _rx, _ws) = session.attach();
         session.detach();
-        // Timeout hasn't elapsed yet
         assert!(!session.is_orphaned());
     }
 
     #[tokio::test]
     async fn test_orphaned_after_timeout() {
         let session = spawn_session();
-        let (_sb, _rx) = session.attach();
+        let (_sb, _rx, _ws) = session.attach();
         session.detach();
-        // Simulate that detach happened 61 seconds ago
         *session.detached_at.lock().unwrap() =
             Some(Instant::now() - ORPHAN_TIMEOUT - std::time::Duration::from_secs(1));
         assert!(session.is_orphaned());
@@ -221,15 +278,16 @@ mod tests {
             .await
             .unwrap();
 
-        // Give the shell time to produce output
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
 
-        let (scrollback, _rx) = session.attach();
-        let text = String::from_utf8_lossy(&scrollback);
-        assert!(
-            text.contains("scrollback_test_marker"),
-            "scrollback should contain marker, got: {text}"
-        );
+        let (events, _rx, _ws) = session.attach();
+        let has_marker = events.iter().any(|e| match e {
+            ScrollbackEvent::Output(data) => {
+                String::from_utf8_lossy(data).contains("scrollback_test_marker")
+            }
+            _ => false,
+        });
+        assert!(has_marker, "scrollback should contain Output with marker");
     }
 
     #[tokio::test]
@@ -240,5 +298,42 @@ mod tests {
 
         assert!(store.get(&id).is_some());
         assert!(store.get("nonexistent").is_none());
+    }
+
+    #[tokio::test]
+    async fn test_scrollback_eviction_removes_whole_events() {
+        let (terminal, output_rx) = Terminal::spawn("/bin/sh", None).expect("spawn");
+        let session = Session::new(terminal, output_rx, 10);
+
+        session.push_scrollback(ScrollbackEvent::Output(b"aaaaa".to_vec())); // 5
+        session.push_scrollback(ScrollbackEvent::Output(b"bbbbb".to_vec())); // 5, total 10
+        session.push_scrollback(ScrollbackEvent::Output(b"ccc".to_vec())); // 3, total 13 → evict
+
+        let sb = session.scrollback.lock().unwrap();
+        let bytes = *session.scrollback_bytes.lock().unwrap();
+        assert!(bytes <= 10, "bytes {bytes} should be within limit");
+        assert!(
+            sb.iter().all(|e| matches!(e, ScrollbackEvent::Output(_))),
+            "all events should be Output"
+        );
+        assert_ne!(
+            sb.front(),
+            Some(&ScrollbackEvent::Output(b"aaaaa".to_vec())),
+            "oldest event should have been evicted"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_window_size_records_event() {
+        let (terminal, output_rx) = Terminal::spawn("/bin/sh", None).expect("spawn");
+        let session = Session::new(terminal, output_rx, TEST_SCROLLBACK_LIMIT);
+
+        session.set_window_size(40, 120);
+
+        let sb = session.scrollback.lock().unwrap();
+        let has_ws = sb
+            .iter()
+            .any(|e| matches!(e, ScrollbackEvent::WindowSize(40, 120)));
+        assert!(has_ws, "scrollback should contain WindowSize(40, 120)");
     }
 }

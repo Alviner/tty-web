@@ -11,8 +11,9 @@
 //! | client → server | `0x01` | rows(u16 BE) + cols(u16 BE) | Resize |
 //! | server → client | `0x00` | raw bytes | Terminal output |
 //! | server → client | `0x10` | UUID string | Session ID |
-//! | server → client | `0x11` | raw bytes | Scrollback snapshot |
 //! | server → client | `0x12` | — | Shell exited |
+//! | server → client | `0x13` | rows(u16 BE) + cols(u16 BE) | Window size |
+//! | server → client | `0x14` | — | Replay end |
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,14 +23,9 @@ use axum::extract::{Query, State};
 use axum::response::IntoResponse;
 use tokio::sync::broadcast::error::RecvError;
 
-use crate::session::Session;
+use crate::session::{ScrollbackEvent, Session};
 use crate::terminal::Terminal;
 use crate::web::AppState;
-
-enum ResolveError {
-    NotFound(String),
-    Io(std::io::Error),
-}
 
 /// Client → Server: terminal input.
 const CMD_INPUT: u8 = 0x00;
@@ -40,13 +36,33 @@ const CMD_RESIZE: u8 = 0x01;
 const CMD_OUTPUT: u8 = 0x00;
 /// Server → Client: session UUID string.
 const CMD_SESSION_ID: u8 = 0x10;
-/// Server → Client: scrollback snapshot on reconnect.
-const CMD_SCROLLBACK: u8 = 0x11;
 /// Server → Client: shell process exited.
 const CMD_SHELL_EXIT: u8 = 0x12;
+/// Server → Client: current PTY window size (4-byte payload: rows u16 BE, cols u16 BE).
+const CMD_WINDOW_SIZE: u8 = 0x13;
+/// Server → Client: end of scrollback replay.
+const CMD_REPLAY_END: u8 = 0x14;
 
 /// WebSocket close code: requested session not found.
 const CLOSE_SESSION_NOT_FOUND: u16 = 4404;
+
+/// Send a protocol frame (command byte + payload) over the WebSocket.
+async fn send_frame(socket: &mut WebSocket, cmd: u8, payload: &[u8]) -> Result<(), ()> {
+    let mut frame = Vec::with_capacity(1 + payload.len());
+    frame.push(cmd);
+    frame.extend_from_slice(payload);
+    socket
+        .send(Message::Binary(frame.into()))
+        .await
+        .map_err(|_| ())
+}
+
+/// Encode a window size as 4 big-endian bytes (rows, cols).
+fn encode_window_size(rows: u16, cols: u16) -> [u8; 4] {
+    let r = rows.to_be_bytes();
+    let c = cols.to_be_bytes();
+    [r[0], r[1], c[0], c[1]]
+}
 
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
@@ -58,12 +74,18 @@ pub async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state, sid, readonly))
 }
 
+enum ResolveError {
+    NotFound(String),
+    Io(std::io::Error),
+}
+
 async fn handle_socket(
     mut socket: WebSocket,
     state: AppState,
     sid: Option<String>,
     readonly: bool,
 ) {
+    // Resolve or create session
     let (session, session_id) = match resolve_session(&state, sid.as_deref()) {
         Ok(result) => result,
         Err(ResolveError::NotFound(id)) => {
@@ -82,30 +104,50 @@ async fn handle_socket(
         }
     };
 
-    // Send session ID
-    let mut sid_frame = Vec::with_capacity(1 + session_id.len());
-    sid_frame.push(CMD_SESSION_ID);
-    sid_frame.extend_from_slice(session_id.as_bytes());
-    if socket
-        .send(Message::Binary(sid_frame.into()))
+    // Handshake: session ID → window size → replay events → replay end
+    if send_frame(&mut socket, CMD_SESSION_ID, session_id.as_bytes())
         .await
         .is_err()
     {
         return;
     }
 
-    // Attach: subscribe + scrollback snapshot (atomically, no gaps)
-    let (scrollback, mut output_rx) = session.attach();
+    let (events, mut output_rx, mut window_size_rx) = session.attach();
 
-    // Send scrollback if non-empty
-    if !scrollback.is_empty() {
-        let mut sb_frame = Vec::with_capacity(1 + scrollback.len());
-        sb_frame.push(CMD_SCROLLBACK);
-        sb_frame.extend_from_slice(&scrollback);
-        if socket.send(Message::Binary(sb_frame.into())).await.is_err() {
+    let (rows, cols) = *window_size_rx.borrow_and_update();
+    if send_frame(
+        &mut socket,
+        CMD_WINDOW_SIZE,
+        &encode_window_size(rows, cols),
+    )
+    .await
+    .is_err()
+    {
+        session.detach();
+        return;
+    }
+
+    // Replay scrollback events
+    for event in &events {
+        let ok = match event {
+            ScrollbackEvent::Output(data) => {
+                send_frame(&mut socket, CMD_OUTPUT, data).await.is_ok()
+            }
+            ScrollbackEvent::WindowSize(r, c) => {
+                send_frame(&mut socket, CMD_WINDOW_SIZE, &encode_window_size(*r, *c))
+                    .await
+                    .is_ok()
+            }
+        };
+        if !ok {
             session.detach();
             return;
         }
+    }
+
+    if send_frame(&mut socket, CMD_REPLAY_END, &[]).await.is_err() {
+        session.detach();
+        return;
     }
 
     // Main loop: bridge WebSocket ↔ session
@@ -115,14 +157,7 @@ async fn handle_socket(
             result = output_rx.recv() => {
                 match result {
                     Ok(data) => {
-                        let mut frame = Vec::with_capacity(1 + data.len());
-                        frame.push(CMD_OUTPUT);
-                        frame.extend_from_slice(&data);
-                        if socket
-                            .send(Message::Binary(frame.into()))
-                            .await
-                            .is_err()
-                        {
+                        if send_frame(&mut socket, CMD_OUTPUT, &data).await.is_err() {
                             break;
                         }
                     }
@@ -139,31 +174,26 @@ async fn handle_socket(
                         if readonly || data.is_empty() {
                             continue;
                         }
-                        handle_client_message(
-                            &session.terminal, &data,
-                        ).await;
+                        handle_client_message(&session, &data).await;
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     _ => {}
                 }
             }
+            Ok(()) = window_size_rx.changed() => {
+                let (rows, cols) = *window_size_rx.borrow_and_update();
+                if send_frame(&mut socket, CMD_WINDOW_SIZE, &encode_window_size(rows, cols)).await.is_err() {
+                    break;
+                }
+            }
             _ = closed_rx.changed() => {
                 // Drain buffered output before sending exit
                 while let Ok(data) = output_rx.try_recv() {
-                    let mut frame = Vec::with_capacity(1 + data.len());
-                    frame.push(CMD_OUTPUT);
-                    frame.extend_from_slice(&data);
-                    if socket
-                        .send(Message::Binary(frame.into()))
-                        .await
-                        .is_err()
-                    {
+                    if send_frame(&mut socket, CMD_OUTPUT, &data).await.is_err() {
                         break;
                     }
                 }
-                let _ = socket
-                    .send(Message::Binary(vec![CMD_SHELL_EXIT].into()))
-                    .await;
+                let _ = send_frame(&mut socket, CMD_SHELL_EXIT, &[]).await;
                 break;
             }
         }
@@ -187,7 +217,7 @@ fn resolve_session(
     }
     let (terminal, output_rx) =
         Terminal::spawn(&state.shell, state.pwd.as_deref()).map_err(ResolveError::Io)?;
-    let session = Session::new(terminal, output_rx);
+    let session = Session::new(terminal, output_rx, state.scrollback_limit);
     let id = state.sessions.insert(session.clone());
     tracing::info!("created new session {id}");
     Ok((session, id))
@@ -214,17 +244,18 @@ fn parse_client_message(data: &[u8]) -> Option<ClientCommand<'_>> {
     }
 }
 
-async fn handle_client_message(terminal: &Terminal, data: &[u8]) {
+async fn handle_client_message(session: &Session, data: &[u8]) {
     match parse_client_message(data) {
         Some(ClientCommand::Input(payload)) => {
-            if let Err(e) = terminal.write(payload.to_vec()).await {
+            if let Err(e) = session.terminal.write(payload.to_vec()).await {
                 tracing::error!("write to terminal failed: {e}");
             }
         }
         Some(ClientCommand::Resize { rows, cols }) => {
-            if let Err(e) = terminal.resize(rows, cols) {
+            if let Err(e) = session.terminal.resize(rows, cols) {
                 tracing::error!("resize failed: {e}");
             }
+            session.set_window_size(rows, cols);
         }
         Some(ClientCommand::Unknown(cmd)) => {
             tracing::warn!("unknown command: 0x{cmd:02x}");

@@ -1,29 +1,55 @@
 name: release
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [master]
+    paths:
+      - 'Cargo.toml'
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
 
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
+
 jobs:
-  version:
+  prepare:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version }}
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      created: ${{ steps.meta.outputs.created }}
     steps:
       - uses: actions/checkout@v6
-      - name: Extract version
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        with:
+          fetch-depth: 0
+
+      - name: Extract version and check tag
+        id: meta
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          if git ls-remote --tags origin "${TAG}" | grep -q "${TAG}"; then
+            echo "Tag ${TAG} already exists, skipping release"
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          else
+            git tag "${TAG}"
+            git push origin "${TAG}"
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
 
   build-binary:
-    needs: version
+    needs: prepare
+    if: needs.prepare.outputs.created == 'true'
     strategy:
       matrix:
         include:
@@ -65,7 +91,8 @@ jobs:
           retention-days: 1
 
   build-image:
-    needs: [version, build-binary]
+    needs: [prepare, build-binary]
+    if: needs.prepare.outputs.created == 'true'
     permissions:
       contents: read
       packages: write
@@ -108,14 +135,14 @@ jobs:
 
       - name: Build and push
         run: |
-          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.version.outputs.version }}-${PLATFORM_PAIR}"
+          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-${PLATFORM_PAIR}"
           docker build --build-arg BINARY=target/${{ matrix.target }}/release/tty-web -t "${IMAGE}" .
           docker push "${IMAGE}"
 
       - name: Export digest
         run: |
           mkdir -p ${{ runner.temp }}/digests
-          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.version.outputs.version }}-${PLATFORM_PAIR}"
+          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.version }}-${PLATFORM_PAIR}"
           digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}" | cut -d@ -f2)
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
@@ -128,7 +155,8 @@ jobs:
           retention-days: 1
 
   merge:
-    needs: [version, build-image]
+    needs: [prepare, build-image]
+    if: needs.prepare.outputs.created == 'true'
     runs-on: ubuntu-latest
 
     permissions:
@@ -164,7 +192,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ needs.version.outputs.version }}
+            type=raw,value=${{ needs.prepare.outputs.version }}
             type=raw,value=latest
 
       - name: Create manifest list and push
@@ -189,12 +217,17 @@ jobs:
           push-to-registry: true
 
   release:
-    needs: [version, build-binary]
+    needs: [prepare, build-binary, merge]
+    if: needs.prepare.outputs.created == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
 
     steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
       - name: Download all binaries
         uses: actions/download-artifact@v8
         with:
@@ -207,9 +240,46 @@ jobs:
         run: sha256sum *.tar.gz > checksums-sha256.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: |
-            ${{ runner.temp }}/binaries/*.tar.gz
+        run: |
+          gh release create "${{ needs.prepare.outputs.tag }}" \
+            --title "tty-web ${{ needs.prepare.outputs.tag }}" \
+            --generate-notes \
+            ${{ runner.temp }}/binaries/*.tar.gz \
             ${{ runner.temp }}/binaries/checksums-sha256.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docs:
+    needs: [prepare, release]
+    if: needs.prepare.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install mdbook
+        run: |
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.44/mdbook-v0.4.44-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C /usr/local/bin
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install mdbook-mermaid
+        run: cargo install --git https://github.com/Alviner/mdbook-mermaid
+      - name: Build book
+        run: mdbook build docs
+      - name: Build API reference
+        run: cargo doc --no-deps --document-private-items
+      - name: Copy API docs into book
+        run: rm -rf docs/book/api && cp -r target/doc docs/book/api
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/book
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -24,15 +24,23 @@ pub struct AppState {
     pub shell: String,
     /// Working directory for new shell sessions.
     pub pwd: Option<PathBuf>,
+    /// Scrollback buffer size in bytes.
+    pub scrollback_limit: usize,
     /// Global session registry.
     pub sessions: Arc<SessionStore>,
 }
 
 /// Build the Axum router with all routes and shared state.
-pub fn router(shell: String, pwd: Option<PathBuf>, sessions: Arc<SessionStore>) -> Router {
+pub fn router(
+    shell: String,
+    pwd: Option<PathBuf>,
+    scrollback_limit: usize,
+    sessions: Arc<SessionStore>,
+) -> Router {
     let state = AppState {
         shell,
         pwd,
+        scrollback_limit,
         sessions,
     };
     Router::new()

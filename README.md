@@ -8,9 +8,9 @@ Web-based terminal emulator. Opens a real PTY in the browser over WebSocket.
 
 - Real PTY with full job control, signals, and terminal capabilities
 - Persistent sessions — reconnect without losing state
-- Scrollback replay (64 KB buffer)
+- Scrollback replay (configurable, 256 KiB default)
 - Session sharing — multiple clients on one session
-- View mode — read-only observers
+- View mode — read-only observers with automatic window size sync
 - Lightweight binary WebSocket protocol
 - Single static binary (frontend embedded via `rust-embed`)
 - Multi-arch Docker images (`amd64` / `arm64`)

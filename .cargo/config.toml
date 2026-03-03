@@ -1,0 +1,4 @@
+[env]
+# Serialize test execution: each test spawns a real PTY + shell process,
+# and parallel runs exhaust OS resources causing flaky timeouts.
+RUST_TEST_THREADS = "1"

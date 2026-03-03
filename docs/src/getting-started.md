@@ -20,6 +20,7 @@ Every flag can also be set via an environment variable.
 | `--log-level` | `TTY_WEB_LOG_LEVEL` | `info` | Log level (`trace`, `debug`, `info`, `warn`, `error`) |
 | `--log-format` | `TTY_WEB_LOG_FORMAT` | `text` | Log output format (`text`, `json`) |
 | `--pwd` | `TTY_WEB_PWD` | *inherited* | Working directory for new shell sessions |
+| `--scrollback-limit` | `TTY_WEB_SCROLLBACK_LIMIT` | `256` | Scrollback buffer size in KiB |
 
 ## Docker
 

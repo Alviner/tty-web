@@ -33,7 +33,7 @@ async fn main() {
 
     let sessions = SessionStore::new();
     let addr = std::net::SocketAddr::new(config.address, config.port);
-    let app = web::router(config.shell, sessions);
+    let app = web::router(config.shell, config.pwd, sessions);
 
     let listener = TcpListener::bind(addr).await.unwrap_or_else(|e| {
         tracing::error!("failed to bind to {}: {}", addr, e);

@@ -4,6 +4,7 @@
 //! read/write loops via tokio. Output is fanned out through a broadcast channel
 //! so multiple subscribers (WebSocket clients) can receive the same stream.
 
+use std::path::Path;
 use std::process::Child;
 use std::sync::{Arc, Mutex};
 
@@ -34,8 +35,10 @@ pub struct Terminal {
 impl Terminal {
     /// Spawn a shell process and return the terminal plus an initial output
     /// receiver.
-    pub fn spawn(shell: &str) -> std::io::Result<(Self, broadcast::Receiver<Vec<u8>>)> {
-        let PtyMaster { master, mut child } = PtyMaster::spawn(shell)?;
+    ///
+    /// If `pwd` is provided, the shell starts in that directory.
+    pub fn spawn(shell: &str, pwd: Option<&Path>) -> std::io::Result<(Self, broadcast::Receiver<Vec<u8>>)> {
+        let PtyMaster { master, mut child } = PtyMaster::spawn(shell, pwd)?;
 
         let async_fd = match AsyncFd::with_interest(master, Interest::READABLE | Interest::WRITABLE)
         {
@@ -171,7 +174,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_write_and_read_output() {
-        let (terminal, mut rx) = Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        let (terminal, mut rx) = Terminal::spawn("/bin/sh", None).expect("spawn /bin/sh");
 
         terminal
             .write(b"echo hello_test_marker\n".to_vec())
@@ -198,13 +201,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_resize() {
-        let (terminal, _rx) = Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        let (terminal, _rx) = Terminal::spawn("/bin/sh", None).expect("spawn /bin/sh");
         terminal.resize(50, 132).expect("resize should succeed");
     }
 
     #[tokio::test]
     async fn test_closed_on_exit() {
-        let (terminal, _rx) = Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        let (terminal, _rx) = Terminal::spawn("/bin/sh", None).expect("spawn /bin/sh");
         let mut closed = terminal.closed();
 
         terminal.write(b"exit\n".to_vec()).await.unwrap();

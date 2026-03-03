@@ -5,6 +5,7 @@
 
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 
 use nix::fcntl;
@@ -22,31 +23,38 @@ pub struct PtyMaster {
 impl PtyMaster {
     /// Allocate a new PTY pair, spawn `shell` on the slave side, and return the
     /// master fd set to non-blocking mode.
-    pub fn spawn(shell: &str) -> std::io::Result<Self> {
+    ///
+    /// If `pwd` is provided, the shell process starts in that directory.
+    pub fn spawn(shell: &str, pwd: Option<&Path>) -> std::io::Result<Self> {
         let pty = openpty(None, None).map_err(std::io::Error::other)?;
 
         let slave_out = pty.slave.try_clone()?;
         let slave_err = pty.slave.try_clone()?;
 
+        let mut cmd = Command::new(shell);
+        cmd.stdin(Stdio::from(pty.slave))
+            .stdout(Stdio::from(slave_out))
+            .stderr(Stdio::from(slave_err))
+            .env("TERM", "xterm-256color")
+            .env("COLORTERM", "truecolor");
+
+        if let Some(dir) = pwd {
+            cmd.current_dir(dir);
+        }
+
         // Safety: pre_exec runs in forked child before exec.
         // Only async-signal-safe libc calls are used.
         let child = unsafe {
-            Command::new(shell)
-                .stdin(Stdio::from(pty.slave))
-                .stdout(Stdio::from(slave_out))
-                .stderr(Stdio::from(slave_err))
-                .env("TERM", "xterm-256color")
-                .env("COLORTERM", "truecolor")
-                .pre_exec(|| {
-                    if libc::setsid() == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    if libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as _, 0) == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                })
-                .spawn()?
+            cmd.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as _, 0) == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            })
+            .spawn()?
         };
 
         // Set master fd to non-blocking for async I/O
@@ -91,7 +99,7 @@ mod tests {
 
     #[test]
     fn test_spawn_and_child_alive() {
-        let mut pty = PtyMaster::spawn("/bin/sh").expect("spawn /bin/sh");
+        let mut pty = PtyMaster::spawn("/bin/sh", None).expect("spawn /bin/sh");
         // Child should still be running
         assert!(
             pty.child.try_wait().unwrap().is_none(),
@@ -104,8 +112,21 @@ mod tests {
 
     #[test]
     fn test_set_window_size() {
-        let mut pty = PtyMaster::spawn("/bin/sh").expect("spawn /bin/sh");
+        let mut pty = PtyMaster::spawn("/bin/sh", None).expect("spawn /bin/sh");
         set_window_size(&pty.master, 40, 120).expect("set_window_size should succeed");
+        let _ = pty.child.kill();
+        let _ = pty.child.wait();
+    }
+
+    #[test]
+    fn test_spawn_with_pwd() {
+        let dir = std::env::temp_dir();
+        let mut pty =
+            PtyMaster::spawn("/bin/sh", Some(dir.as_path())).expect("spawn with pwd");
+        assert!(
+            pty.child.try_wait().unwrap().is_none(),
+            "child should be alive"
+        );
         let _ = pty.child.kill();
         let _ = pty.child.wait();
     }

@@ -9,6 +9,7 @@ mod health;
 mod static_files;
 mod ws;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::Router;
@@ -21,13 +22,15 @@ use crate::session::SessionStore;
 pub struct AppState {
     /// Shell binary path (e.g. `/bin/bash`).
     pub shell: String,
+    /// Working directory for new shell sessions.
+    pub pwd: Option<PathBuf>,
     /// Global session registry.
     pub sessions: Arc<SessionStore>,
 }
 
 /// Build the Axum router with all routes and shared state.
-pub fn router(shell: String, sessions: Arc<SessionStore>) -> Router {
-    let state = AppState { shell, sessions };
+pub fn router(shell: String, pwd: Option<PathBuf>, sessions: Arc<SessionStore>) -> Router {
+    let state = AppState { shell, pwd, sessions };
     Router::new()
         .route("/ws", get(ws::ws_handler))
         .route("/api/v1/ping", get(health::ping))

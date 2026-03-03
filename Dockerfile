@@ -47,7 +47,8 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --default-toolchain stable --profile minimal
 
 ARG NVIM_VERSION=0.10.4
-RUN curl -fsSL "https://github.com/neovim/neovim/releases/download/v${NVIM_VERSION}/nvim-linux-$(uname -m).tar.gz" \
+RUN ARCH=$(uname -m) && [ "$ARCH" = "aarch64" ] && ARCH=arm64; \
+    curl -fsSL "https://github.com/neovim/neovim/releases/download/v${NVIM_VERSION}/nvim-linux-${ARCH}.tar.gz" \
     | tar -C /usr/local --strip-components=1 -xz
 
 RUN git clone --depth 1 https://github.com/AstroNvim/template ~/.config/nvim \

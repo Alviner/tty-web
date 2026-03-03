@@ -25,6 +25,9 @@ const CMD_SESSION_ID: u8 = 0x10;
 const CMD_SCROLLBACK: u8 = 0x11;
 const CMD_SHELL_EXIT: u8 = 0x12;
 
+// WebSocket close codes (4000–4999: application-specific)
+const CLOSE_SESSION_NOT_FOUND: u16 = 4404;
+
 pub async fn ws_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<HashMap<String, String>>,
@@ -47,7 +50,7 @@ async fn handle_socket(
             tracing::warn!("session {id} not found");
             let _ = socket
                 .send(Message::Close(Some(CloseFrame {
-                    code: 4404,
+                    code: CLOSE_SESSION_NOT_FOUND,
                     reason: "session not found".into(),
                 })))
                 .await;
@@ -174,29 +177,85 @@ fn resolve_session(
     Ok((session, id))
 }
 
-async fn handle_client_message(terminal: &Terminal, data: &[u8]) {
-    let cmd = data[0];
-    let payload = &data[1..];
+#[derive(Debug, PartialEq)]
+enum ClientCommand<'a> {
+    Input(&'a [u8]),
+    Resize { rows: u16, cols: u16 },
+    Unknown(u8),
+}
 
+fn parse_client_message(data: &[u8]) -> Option<ClientCommand<'_>> {
+    let (&cmd, payload) = data.split_first()?;
     match cmd {
-        CMD_INPUT => {
+        CMD_INPUT => Some(ClientCommand::Input(payload)),
+        CMD_RESIZE if payload.len() >= 4 => {
+            let rows = u16::from_be_bytes([payload[0], payload[1]]);
+            let cols = u16::from_be_bytes([payload[2], payload[3]]);
+            Some(ClientCommand::Resize { rows, cols })
+        }
+        CMD_RESIZE => None,
+        other => Some(ClientCommand::Unknown(other)),
+    }
+}
+
+async fn handle_client_message(terminal: &Terminal, data: &[u8]) {
+    match parse_client_message(data) {
+        Some(ClientCommand::Input(payload)) => {
             if let Err(e) = terminal.write(payload.to_vec()).await {
                 tracing::error!("write to terminal failed: {e}");
             }
         }
-        CMD_RESIZE => {
-            if payload.len() >= 4 {
-                let rows =
-                    u16::from_be_bytes([payload[0], payload[1]]);
-                let cols =
-                    u16::from_be_bytes([payload[2], payload[3]]);
-                if let Err(e) = terminal.resize(rows, cols) {
-                    tracing::error!("resize failed: {e}");
-                }
+        Some(ClientCommand::Resize { rows, cols }) => {
+            if let Err(e) = terminal.resize(rows, cols) {
+                tracing::error!("resize failed: {e}");
             }
         }
-        _ => {
+        Some(ClientCommand::Unknown(cmd)) => {
             tracing::warn!("unknown command: 0x{cmd:02x}");
         }
+        None => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_input() {
+        let data = [0x00, b'h', b'i'];
+        assert_eq!(
+            parse_client_message(&data),
+            Some(ClientCommand::Input(b"hi"))
+        );
+    }
+
+    #[test]
+    fn test_parse_resize() {
+        let data = [0x01, 0, 24, 0, 80];
+        assert_eq!(
+            parse_client_message(&data),
+            Some(ClientCommand::Resize { rows: 24, cols: 80 })
+        );
+    }
+
+    #[test]
+    fn test_parse_resize_too_short() {
+        let data = [0x01, 0, 24];
+        assert_eq!(parse_client_message(&data), None);
+    }
+
+    #[test]
+    fn test_parse_empty() {
+        assert_eq!(parse_client_message(&[]), None);
+    }
+
+    #[test]
+    fn test_parse_unknown() {
+        let data = [0xFF, 1];
+        assert_eq!(
+            parse_client_message(&data),
+            Some(ClientCommand::Unknown(0xFF))
+        );
     }
 }

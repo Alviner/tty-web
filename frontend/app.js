@@ -8,6 +8,9 @@ var CMD_SESSION_ID = 0x10;
 var CMD_SCROLLBACK = 0x11;
 var CMD_SHELL_EXIT = 0x12;
 
+// WebSocket close codes (4000–4999: application-specific)
+var CLOSE_SESSION_NOT_FOUND = 4404;
+
 var RECONNECT_BASE_MS = 1000;
 var RECONNECT_MAX_MS = 5000;
 
@@ -50,6 +53,7 @@ function main() {
   term.loadAddon(fitAddon);
   term.loadAddon(webLinksAddon);
   term.open(document.getElementById("terminal"));
+  term.focus();
   fitAddon.fit();
 
   // Ligatures: enable OpenType contextual alternates and register
@@ -117,7 +121,7 @@ function main() {
 
   function getSid() {
     var params = new URLSearchParams(location.search);
-    return params.get("sid") || sessionStorage.getItem("tty-web-sid");
+    return params.get("sid");
   }
 
   function connect() {
@@ -152,14 +156,15 @@ function main() {
           break;
         case CMD_SESSION_ID:
           var newSid = new TextDecoder().decode(payload);
-          var oldSid = sessionStorage.getItem("tty-web-sid");
-          console.log("[tty-web] session_id:", newSid, oldSid === newSid ? "(reattach)" : "(new)");
-          if (newSid !== oldSid) {
+          var isReattach = newSid === currentSid;
+          console.log("[tty-web] session_id:", newSid, isReattach ? "(reattach)" : "(new)");
+          if (!isReattach) {
             term.reset();
             sendResize();
           }
-          sessionStorage.setItem("tty-web-sid", newSid);
           currentSid = newSid;
+          var newUrl = "/?sid=" + newSid + (readonly ? "&view" : "");
+          history.replaceState(null, "", newUrl);
           sbSid.textContent = "\uF489 " + newSid.substring(0, 8);
           sbCopy.disabled = false;
           sbView.disabled = false;
@@ -176,7 +181,6 @@ function main() {
           break;
         case CMD_SHELL_EXIT:
           shellExited = true;
-          sessionStorage.removeItem("tty-web-sid");
           term.write("\r\n\x1b[90m[Shell exited.]\x1b[0m\r\n");
           setStatus("exited", "red");
           break;
@@ -184,8 +188,7 @@ function main() {
     };
 
     ws.onclose = function (ev) {
-      if (ev.code === 4404) {
-        sessionStorage.removeItem("tty-web-sid");
+      if (ev.code === CLOSE_SESSION_NOT_FOUND) {
         term.write("\r\n\x1b[90m[Session not found.]\x1b[0m\r\n");
         setStatus("no session", "red");
         return;
@@ -259,7 +262,6 @@ function main() {
   });
 
   sbNew.addEventListener("click", function () {
-    sessionStorage.removeItem("tty-web-sid");
     location.href = location.origin + "/";
   });
 

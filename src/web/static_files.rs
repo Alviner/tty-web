@@ -41,3 +41,29 @@ fn serve_file(path: &str) -> Response {
     );
     response
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_index_html() {
+        let response = serve_file("index.html");
+        assert_eq!(response.status(), StatusCode::OK);
+        let ct = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .expect("content-type header");
+        assert!(
+            ct.to_str().unwrap().contains("text/html"),
+            "expected text/html, got: {:?}",
+            ct
+        );
+    }
+
+    #[test]
+    fn test_not_found() {
+        let response = serve_file("nonexistent_file.xyz");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+}

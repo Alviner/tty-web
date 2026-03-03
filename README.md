@@ -13,7 +13,7 @@ Web-based terminal emulator. Opens a real PTY in the browser over WebSocket.
 - View mode — read-only observers with automatic window size sync
 - Lightweight binary WebSocket protocol
 - Single static binary (frontend embedded via `rust-embed`)
-- Multi-arch Docker images (`amd64` / `arm64`)
+- Multi-arch Docker images (`amd64` / `arm64`) — minimal scratch and playground variants
 
 ## Quick start
 
@@ -24,7 +24,13 @@ tty-web --address 127.0.0.1 --port 9090 --shell /bin/zsh
 Or with Docker:
 
 ```bash
-docker run --rm -p 9090:9090 ghcr.io/alviner/tty-web:latest
+docker run --rm -p 9090:9090 ghcr.io/alviner/tty-web:playground
+```
+
+The default `latest` tag is a minimal scratch image for `COPY --from`:
+
+```dockerfile
+COPY --from=ghcr.io/alviner/tty-web:latest /tty-web /usr/local/bin/tty-web
 ```
 
 ## Documentation

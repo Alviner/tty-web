@@ -24,15 +24,30 @@ Every flag can also be set via an environment variable.
 
 ## Docker
 
-Pre-built images are available for `linux/amd64` and `linux/arm64`:
+Pre-built images are available for `linux/amd64` and `linux/arm64` in two variants:
+
+| Variant | Tags | Description |
+|---------|------|-------------|
+| minimal | `latest`, `<version>` | Single static binary (~5 MB), ideal for `COPY --from` |
+| playground | `playground`, `<version>-playground` | Ubuntu with Python, Node, Go, Rust, Neovim |
+
+### Minimal (default)
+
+Scratch-based image with a single static binary. Use as a source for `COPY --from`:
+
+```dockerfile
+COPY --from=ghcr.io/alviner/tty-web:latest /tty-web /usr/local/bin/tty-web
+```
+
+### Playground
 
 ```bash
-docker run --rm -p 9090:9090 ghcr.io/alviner/tty-web:latest
+docker run --rm -p 9090:9090 ghcr.io/alviner/tty-web:playground
 ```
 
 Override the default shell:
 
 ```bash
-docker run --rm -p 9090:9090 ghcr.io/alviner/tty-web:latest \
+docker run --rm -p 9090:9090 ghcr.io/alviner/tty-web:playground \
   tty-web --shell /bin/sh
 ```

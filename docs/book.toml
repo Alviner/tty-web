@@ -15,3 +15,4 @@ default-theme = "navy"
 git-repository-url = "https://github.com/Alviner/tty-web"
 edit-url-template = "https://github.com/Alviner/tty-web/edit/master/docs/{path}"
 additional-css = ["theme.css"]
+additional-js = ["sidebar-logo.js"]

@@ -1,31 +1,20 @@
 /* Sidebar logo above navigation */
-.sidebar-scrollbox::before {
-    content: "";
+.sidebar-logo {
     display: block;
     width: 120px;
     height: 109px;
     margin: 20px auto 16px;
-    background-size: contain;
-    background-repeat: no-repeat;
-    background-position: center;
 }
 
-.navy .sidebar-scrollbox::before {
-    background-image: url("images/logo-navy.svg");
+.sidebar-logo img {
+    width: 100%;
+    height: 100%;
 }
 
-.coal .sidebar-scrollbox::before {
-    background-image: url("images/logo-coal.svg");
-}
-
-.ayu .sidebar-scrollbox::before {
-    background-image: url("images/logo-ayu.svg");
-}
-
-.rust .sidebar-scrollbox::before {
-    background-image: url("images/logo-rust.svg");
-}
-
-.light .sidebar-scrollbox::before {
-    background-image: url("images/logo-light.svg");
-}
+/* Theme-specific logo visibility */
+.sidebar-logo img { display: none; }
+.navy .sidebar-logo img[data-theme="navy"] { display: block; }
+.coal .sidebar-logo img[data-theme="coal"] { display: block; }
+.ayu .sidebar-logo img[data-theme="ayu"] { display: block; }
+.rust .sidebar-logo img[data-theme="rust"] { display: block; }
+.light .sidebar-logo img[data-theme="light"] { display: block; }

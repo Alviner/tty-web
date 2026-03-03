@@ -6,10 +6,12 @@ closing a tab or losing connectivity does not kill the shell.
 
 ## Reconnect
 
-The client stores the session ID in `sessionStorage` and passes it as
-`?sid=<uuid>` on reconnect. The server replays the scrollback buffer (last
-64 KB of output) and then streams live output — no gaps. From the user's
-perspective the terminal picks up where it left off.
+On first connect the server assigns a UUID and the client updates the browser
+URL to `/?sid=<uuid>` via `history.replaceState`. On reconnect the client
+reads `sid` from the URL and passes it as a query parameter. The server
+replays the scrollback buffer (last 64 KB of output) and then streams live
+output — no gaps. From the user's perspective the terminal picks up where it
+left off.
 
 Reconnection uses exponential backoff starting at 1 s up to a maximum of 5 s.
 

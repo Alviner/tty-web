@@ -21,6 +21,14 @@ use crate::terminal::Terminal;
 /// Time without any attached clients before a session is reaped.
 const ORPHAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// Return type of [`Session::attach`]: scrollback events, output stream,
+/// and window-size watch.
+pub type AttachResult = (
+    Vec<ScrollbackEvent>,
+    broadcast::Receiver<Vec<u8>>,
+    watch::Receiver<(u16, u16)>,
+);
+
 /// A scrollback event — either terminal output or a window-size change.
 ///
 /// Storing events instead of raw bytes ensures that eviction never splits
@@ -118,13 +126,7 @@ impl Session {
     /// Attach a client: increment the counter, subscribe to live output, and
     /// return the scrollback event log. The subscription and snapshot are taken
     /// under the same lock so no output is lost.
-    pub fn attach(
-        &self,
-    ) -> (
-        Vec<ScrollbackEvent>,
-        broadcast::Receiver<Vec<u8>>,
-        watch::Receiver<(u16, u16)>,
-    ) {
+    pub fn attach(&self) -> AttachResult {
         self.clients.fetch_add(1, Ordering::Relaxed);
         *self.detached_at.lock().unwrap() = None;
         let sb = self.scrollback.lock().unwrap();

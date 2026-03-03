@@ -174,7 +174,7 @@ async fn handle_socket(
                         if readonly || data.is_empty() {
                             continue;
                         }
-                        handle_client_message(&*session, &data).await;
+                        handle_client_message(&session, &data).await;
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     _ => {}

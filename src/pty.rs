@@ -121,8 +121,7 @@ mod tests {
     #[test]
     fn test_spawn_with_pwd() {
         let dir = std::env::temp_dir();
-        let mut pty =
-            PtyMaster::spawn("/bin/sh", Some(dir.as_path())).expect("spawn with pwd");
+        let mut pty = PtyMaster::spawn("/bin/sh", Some(dir.as_path())).expect("spawn with pwd");
         assert!(
             pty.child.try_wait().unwrap().is_none(),
             "child should be alive"

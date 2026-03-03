@@ -1,6 +1,9 @@
+//! Health-check endpoint (`GET /api/v1/ping`).
+
 use axum::Json;
 use serde::Serialize;
 
+/// Response body for the health-check endpoint.
 #[derive(Serialize)]
 pub struct HealthResponse {
     status: &'static str,

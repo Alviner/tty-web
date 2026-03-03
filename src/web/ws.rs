@@ -1,3 +1,19 @@
+//! WebSocket handler implementing the tty-web binary protocol.
+//!
+//! # Wire protocol
+//!
+//! All WebSocket messages are **binary frames**. The first byte is the command,
+//! the rest is the payload.
+//!
+//! | Direction | Cmd | Payload | Description |
+//! |-----------|------|---------|-------------|
+//! | client → server | `0x00` | raw bytes | Terminal input |
+//! | client → server | `0x01` | rows(u16 BE) + cols(u16 BE) | Resize |
+//! | server → client | `0x00` | raw bytes | Terminal output |
+//! | server → client | `0x10` | UUID string | Session ID |
+//! | server → client | `0x11` | raw bytes | Scrollback snapshot |
+//! | server → client | `0x12` | — | Shell exited |
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -15,17 +31,21 @@ enum ResolveError {
     Io(std::io::Error),
 }
 
-// Client → Server
+/// Client → Server: terminal input.
 const CMD_INPUT: u8 = 0x00;
+/// Client → Server: resize (4-byte payload: rows u16 BE, cols u16 BE).
 const CMD_RESIZE: u8 = 0x01;
 
-// Server → Client
+/// Server → Client: terminal output.
 const CMD_OUTPUT: u8 = 0x00;
+/// Server → Client: session UUID string.
 const CMD_SESSION_ID: u8 = 0x10;
+/// Server → Client: scrollback snapshot on reconnect.
 const CMD_SCROLLBACK: u8 = 0x11;
+/// Server → Client: shell process exited.
 const CMD_SHELL_EXIT: u8 = 0x12;
 
-// WebSocket close codes (4000–4999: application-specific)
+/// WebSocket close code: requested session not found.
 const CLOSE_SESSION_NOT_FOUND: u16 = 4404;
 
 pub async fn ws_handler(

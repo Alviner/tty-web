@@ -3,7 +3,7 @@ VERSION ?= $(shell cargo metadata --format-version=1 --no-deps | jq -r '.package
 TARGET ?= $(shell rustc -vV | awk '/host/{print $$2}' | sed 's/gnu/musl/')
 
 .PHONY: build run release clean fmt lint check
-.PHONY: docker upload
+.PHONY: docker upload docs docs-serve
 
 build:
 	cargo build
@@ -28,3 +28,12 @@ check:
 
 docker: release
 	docker build --build-arg BINARY=target/$(TARGET)/release/tty-web -t $(IMAGE):$(VERSION) .
+
+docs:
+	mdbook build docs
+	cargo doc --no-deps --document-private-items
+	rm -rf docs/book/api
+	cp -r target/doc docs/book/api
+
+docs-serve: docs
+	mdbook serve docs

@@ -1,3 +1,8 @@
+//! UNIX pseudo-terminal (PTY) allocation and window-size control.
+//!
+//! Wraps `openpty(3)` and `ioctl(TIOCSWINSZ)` from the [`nix`] crate into a
+//! safe, async-friendly interface.
+
 use std::os::fd::{AsFd, AsRawFd, OwnedFd};
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Stdio};
@@ -6,12 +11,17 @@ use nix::fcntl;
 use nix::libc;
 use nix::pty::openpty;
 
+/// Owns the master side of a PTY and the child shell process.
 pub struct PtyMaster {
+    /// Master file descriptor (non-blocking).
     pub master: OwnedFd,
+    /// Child process running the shell.
     pub child: Child,
 }
 
 impl PtyMaster {
+    /// Allocate a new PTY pair, spawn `shell` on the slave side, and return the
+    /// master fd set to non-blocking mode.
     pub fn spawn(shell: &str) -> std::io::Result<Self> {
         let pty = openpty(None, None).map_err(std::io::Error::other)?;
 

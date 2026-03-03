@@ -1,9 +1,15 @@
+//! Static file serving with compile-time embedded frontend assets.
+//!
+//! All files under `frontend/` are embedded into the binary via
+//! [`rust_embed`]. MIME types are detected automatically.
+
 use axum::body::Body;
 use axum::extract::Path;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 
+/// Frontend assets embedded at compile time.
 #[derive(RustEmbed)]
 #[folder = "frontend/"]
 struct Assets;

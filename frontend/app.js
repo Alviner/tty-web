@@ -1,5 +1,34 @@
 "use strict";
 
+var log = (function () {
+  var PREFIX = "[tty-web]";
+
+  function fmt(ctx) {
+    if (!ctx) return PREFIX;
+    var parts = [PREFIX];
+    for (var k in ctx) parts.push(k + "=" + ctx[k]);
+    return parts.join(" ");
+  }
+
+  function create(ctx) {
+    var tag = fmt(ctx);
+    return {
+      info:  function () { var a = [].slice.call(arguments); a.unshift(tag); console.log.apply(console, a); },
+      warn:  function () { var a = [].slice.call(arguments); a.unshift(tag); console.warn.apply(console, a); },
+      error: function () { var a = [].slice.call(arguments); a.unshift(tag); console.error.apply(console, a); },
+      debug: function () { var a = [].slice.call(arguments); a.unshift(tag); console.debug.apply(console, a); },
+      child: function (extra) {
+        var merged = {};
+        if (ctx) for (var k in ctx) merged[k] = ctx[k];
+        for (var k2 in extra) merged[k2] = extra[k2];
+        return create(merged);
+      },
+    };
+  }
+
+  return create();
+})();
+
 var CMD_INPUT = 0x00;
 var CMD_RESIZE = 0x01;
 
@@ -95,7 +124,7 @@ function main() {
   var sbCopy = document.getElementById("sb-copy");
   var sbView = document.getElementById("sb-view");
   var sbNew = document.getElementById("sb-new");
-  var currentSid = null;
+  var currentSid = getSid();
 
   sbMode.textContent = readonly ? "\uF06E view" : "\uF11C interactive";
 
@@ -110,6 +139,7 @@ function main() {
   var resizeSent = false;
   var shellExited = false;
   var replaying = false;
+  var wsLog = log;
 
   function sendResize() {
     if (readonly) return;
@@ -141,6 +171,7 @@ function main() {
       reconnectDelay = RECONNECT_BASE_MS;
       resizeSent = false;
       setStatus("connected", "green");
+      wsLog.info("connected");
     };
 
     ws.onmessage = function (event) {
@@ -157,7 +188,8 @@ function main() {
         case CMD_SESSION_ID:
           var newSid = new TextDecoder().decode(payload);
           var isReattach = newSid === currentSid;
-          console.log("[tty-web] session_id:", newSid, isReattach ? "(reattach)" : "(new)");
+          wsLog = log.child({ sid: newSid.substring(0, 8) });
+          wsLog.info("session", isReattach ? "(reattach)" : "(new)");
           if (!isReattach) {
             term.reset();
             sendResize();
@@ -170,7 +202,7 @@ function main() {
           sbView.disabled = false;
           break;
         case CMD_SCROLLBACK:
-          console.log("[tty-web] scrollback:", payload.length, "bytes");
+          wsLog.info("scrollback:", payload.length, "bytes");
           replaying = true;
           term.reset();
           term.write(payload, function () {
@@ -181,6 +213,7 @@ function main() {
           break;
         case CMD_SHELL_EXIT:
           shellExited = true;
+          wsLog.info("shell exited");
           term.write("\r\n\x1b[90m[Shell exited.]\x1b[0m\r\n");
           setStatus("exited", "red");
           break;
@@ -189,11 +222,13 @@ function main() {
 
     ws.onclose = function (ev) {
       if (ev.code === CLOSE_SESSION_NOT_FOUND) {
+        wsLog.warn("session not found, code:", ev.code);
         term.write("\r\n\x1b[90m[Session not found.]\x1b[0m\r\n");
         setStatus("no session", "red");
         return;
       }
       if (shellExited) return;
+      wsLog.info("disconnected, code:", ev.code);
       setStatus("reconnecting", "yellow");
       term.write(
         "\r\n\x1b[33m[Disconnected. Reconnecting in " +
@@ -207,7 +242,7 @@ function main() {
       );
     };
 
-    ws.onerror = function () {};
+    ws.onerror = function () { wsLog.error("websocket error"); };
   }
 
   term.onData(function (data) {

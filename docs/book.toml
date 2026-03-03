@@ -1,0 +1,17 @@
+[book]
+title = "tty-web"
+description = "Web-based terminal emulator"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[preprocessor.mermaid]
+command = "mdbook-mermaid"
+
+[output.html]
+default-theme = "navy"
+git-repository-url = "https://github.com/Alviner/tty-web"
+edit-url-template = "https://github.com/Alviner/tty-web/edit/master/docs/{path}"
+additional-css = ["theme.css"]

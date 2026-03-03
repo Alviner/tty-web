@@ -1,3 +1,13 @@
+//! Persistent terminal sessions with scrollback and lifecycle management.
+//!
+//! A [`Session`] wraps a [`Terminal`] and adds:
+//! - a 64 KB ring-buffer of recent output (scrollback),
+//! - client attach/detach tracking,
+//! - orphan detection (no clients for 60 s → auto-remove).
+//!
+//! [`SessionStore`] is the global session registry. Each session gets a reaper
+//! task that periodically checks for removal conditions.
+
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -8,10 +18,15 @@ use tokio::sync::broadcast;
 
 use crate::terminal::Terminal;
 
+/// Maximum scrollback buffer size in bytes.
 const SCROLLBACK_LIMIT: usize = 64 * 1024;
-const ORPHAN_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(60);
+/// Time without any attached clients before a session is reaped.
+const ORPHAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// A persistent terminal session.
+///
+/// Tracks connected clients, buffers recent output for replay on reconnect,
+/// and detects when the session becomes orphaned.
 pub struct Session {
     pub terminal: Terminal,
     scrollback: Mutex<VecDeque<u8>>,
@@ -20,15 +35,11 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(
-        terminal: Terminal,
-        output_rx: broadcast::Receiver<Vec<u8>>,
-    ) -> Arc<Self> {
+    /// Create a new session and spawn a background scrollback collector task.
+    pub fn new(terminal: Terminal, output_rx: broadcast::Receiver<Vec<u8>>) -> Arc<Self> {
         let session = Arc::new(Self {
             terminal,
-            scrollback: Mutex::new(VecDeque::with_capacity(
-                SCROLLBACK_LIMIT,
-            )),
+            scrollback: Mutex::new(VecDeque::with_capacity(SCROLLBACK_LIMIT)),
             clients: AtomicUsize::new(0),
             detached_at: Mutex::new(None),
         });
@@ -62,7 +73,9 @@ impl Session {
         session
     }
 
-    /// Subscribe to live output and get a scrollback snapshot atomically.
+    /// Attach a client: increment the counter, subscribe to live output, and
+    /// return a scrollback snapshot. The subscription and snapshot are taken
+    /// under the same lock so no output is lost.
     pub fn attach(&self) -> (Vec<u8>, broadcast::Receiver<Vec<u8>>) {
         self.clients.fetch_add(1, Ordering::Relaxed);
         *self.detached_at.lock().unwrap() = None;
@@ -72,6 +85,7 @@ impl Session {
         (snapshot, rx)
     }
 
+    /// Detach a client. When the last client detaches, the orphan timer starts.
     pub fn detach(&self) {
         if self.clients.fetch_sub(1, Ordering::Relaxed) == 1 {
             *self.detached_at.lock().unwrap() = Some(Instant::now());
@@ -89,21 +103,23 @@ impl Session {
     }
 }
 
+/// Thread-safe session registry keyed by UUID.
 pub struct SessionStore {
     sessions: RwLock<HashMap<String, Arc<Session>>>,
 }
 
 impl SessionStore {
+    /// Create an empty session store.
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             sessions: RwLock::new(HashMap::new()),
         })
     }
 
-    pub fn insert(
-        self: &Arc<Self>,
-        session: Arc<Session>,
-    ) -> String {
+    /// Register a session under a new UUID and spawn a reaper task that
+    /// removes it when the shell exits with no clients or the orphan timeout
+    /// elapses.
+    pub fn insert(self: &Arc<Self>, session: Arc<Session>) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         self.sessions
             .write()
@@ -116,18 +132,14 @@ impl SessionStore {
         let closed_rx = session.terminal.closed();
         tokio::spawn(async move {
             loop {
-                tokio::time::sleep(std::time::Duration::from_secs(1))
-                    .await;
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                 let Some(store) = store.upgrade() else { return };
                 let should_remove = {
                     let sessions = store.sessions.read().unwrap();
                     match sessions.get(&sid) {
                         Some(s) => {
                             s.is_orphaned()
-                                || (*closed_rx.borrow()
-                                    && s.clients
-                                        .load(Ordering::Relaxed)
-                                        == 0)
+                                || (*closed_rx.borrow() && s.clients.load(Ordering::Relaxed) == 0)
                         }
                         None => return,
                     }
@@ -143,6 +155,7 @@ impl SessionStore {
         id
     }
 
+    /// Look up a session by ID.
     pub fn get(&self, id: &str) -> Option<Arc<Session>> {
         self.sessions.read().unwrap().get(id).cloned()
     }
@@ -153,8 +166,7 @@ mod tests {
     use super::*;
 
     fn spawn_session() -> Arc<Session> {
-        let (terminal, output_rx) =
-            Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        let (terminal, output_rx) = Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
         Session::new(terminal, output_rx)
     }
 

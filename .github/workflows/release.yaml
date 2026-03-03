@@ -2,13 +2,13 @@ name: release
 
 on:
   push:
-    branches: [master]
+    tags: ['v*']
 
 env:
   REGISTRY: ghcr.io
 
 jobs:
-  build-binary:
+  check:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -18,12 +18,54 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Extract version
         id: version
-        run: echo "version=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')" >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
       - run: cargo clippy -- -D warnings
       - run: cargo test
 
+  build-binary:
+    needs: check
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+          - target: aarch64-unknown-linux-musl
+            runner: ubuntu-24.04-arm
+          - target: x86_64-apple-darwin
+            runner: macos-13
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install musl-tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get install -y musl-tools
+
+      - run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package binary
+        run: |
+          ARCHIVE="tty-web-${{ matrix.target }}.tar.gz"
+          tar czf "${{ runner.temp }}/${ARCHIVE}" -C target/${{ matrix.target }}/release tty-web
+          echo "ARCHIVE=${ARCHIVE}" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: binary-${{ matrix.target }}
+          path: ${{ runner.temp }}/${{ env.ARCHIVE }}
+          retention-days: 1
+
   build-image:
-    needs: build-binary
+    needs: [check, build-binary]
     permissions:
       contents: read
       packages: write
@@ -48,26 +90,32 @@ jobs:
           echo "IMAGE_NAME=${REGISTRY}/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Download binary
+        uses: actions/download-artifact@v8
         with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get install -y musl-tools
-      - run: cargo build --release --target ${{ matrix.target }}
+          name: binary-${{ matrix.target }}
+          path: ${{ runner.temp }}
+
+      - name: Extract binary
+        run: |
+          mkdir -p target/${{ matrix.target }}/release
+          tar xzf "${{ runner.temp }}/tty-web-${{ matrix.target }}.tar.gz" \
+            -C target/${{ matrix.target }}/release
 
       - name: Log in to the Container registry
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
       - name: Build and push
         run: |
-          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.build-binary.outputs.version }}-${PLATFORM_PAIR}"
+          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.check.outputs.version }}-${PLATFORM_PAIR}"
           docker build --build-arg BINARY=target/${{ matrix.target }}/release/tty-web -t "${IMAGE}" .
           docker push "${IMAGE}"
 
       - name: Export digest
         run: |
           mkdir -p ${{ runner.temp }}/digests
-          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.build-binary.outputs.version }}-${PLATFORM_PAIR}"
+          IMAGE="${{ env.IMAGE_NAME }}:${{ needs.check.outputs.version }}-${PLATFORM_PAIR}"
           digest=$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}" | cut -d@ -f2)
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
@@ -80,7 +128,7 @@ jobs:
           retention-days: 1
 
   merge:
-    needs: [build-binary, build-image]
+    needs: [check, build-image]
     runs-on: ubuntu-latest
 
     permissions:
@@ -116,7 +164,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ needs.build-binary.outputs.version }}
+            type=raw,value=${{ needs.check.outputs.version }}
             type=raw,value=latest
 
       - name: Create manifest list and push
@@ -139,3 +187,29 @@ jobs:
           subject-name: ${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.inspect.outputs.digest }}
           push-to-registry: true
+
+  release:
+    needs: [check, build-binary]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all binaries
+        uses: actions/download-artifact@v8
+        with:
+          pattern: binary-*
+          path: ${{ runner.temp }}/binaries
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: ${{ runner.temp }}/binaries
+        run: sha256sum *.tar.gz > checksums-sha256.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            ${{ runner.temp }}/binaries/*.tar.gz
+            ${{ runner.temp }}/binaries/checksums-sha256.txt

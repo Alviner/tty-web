@@ -1,10 +1,16 @@
+//! High-level terminal abstraction over a PTY.
+//!
+//! [`Terminal`] owns a [`PtyMaster`] and drives async
+//! read/write loops via tokio. Output is fanned out through a broadcast channel
+//! so multiple subscribers (WebSocket clients) can receive the same stream.
+
 use std::process::Child;
 use std::sync::{Arc, Mutex};
 
 use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
-use tokio::io::unix::AsyncFd;
 use tokio::io::Interest;
+use tokio::io::unix::AsyncFd;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::pty::PtyMaster;
@@ -13,6 +19,10 @@ const OUTPUT_CHANNEL_SIZE: usize = 64;
 const INPUT_CHANNEL_SIZE: usize = 256;
 const READ_BUF_SIZE: usize = 4096;
 
+/// Async terminal backed by a real PTY.
+///
+/// Spawns two background tasks (read loop and write loop) that bridge the PTY
+/// fd with tokio channels. Sends `SIGHUP` to the child process on drop.
 pub struct Terminal {
     input_tx: mpsc::Sender<Vec<u8>>,
     output_tx: broadcast::Sender<Vec<u8>>,
@@ -22,18 +32,13 @@ pub struct Terminal {
 }
 
 impl Terminal {
-    pub fn spawn(
-        shell: &str,
-    ) -> std::io::Result<(Self, broadcast::Receiver<Vec<u8>>)> {
-        let PtyMaster {
-            master,
-            mut child,
-        } = PtyMaster::spawn(shell)?;
+    /// Spawn a shell process and return the terminal plus an initial output
+    /// receiver.
+    pub fn spawn(shell: &str) -> std::io::Result<(Self, broadcast::Receiver<Vec<u8>>)> {
+        let PtyMaster { master, mut child } = PtyMaster::spawn(shell)?;
 
-        let async_fd = match AsyncFd::with_interest(
-            master,
-            Interest::READABLE | Interest::WRITABLE,
-        ) {
+        let async_fd = match AsyncFd::with_interest(master, Interest::READABLE | Interest::WRITABLE)
+        {
             Ok(fd) => fd,
             Err(e) => {
                 let _ = child.kill();
@@ -44,8 +49,7 @@ impl Terminal {
         let fd = Arc::new(async_fd);
 
         let (input_tx, input_rx) = mpsc::channel(INPUT_CHANNEL_SIZE);
-        let (output_tx, output_rx) =
-            broadcast::channel(OUTPUT_CHANNEL_SIZE);
+        let (output_tx, output_rx) = broadcast::channel(OUTPUT_CHANNEL_SIZE);
         let (closed_tx, closed_rx) = watch::channel(false);
 
         let read_fd = fd.clone();
@@ -70,6 +74,7 @@ impl Terminal {
         Ok((terminal, output_rx))
     }
 
+    /// Subscribe to the terminal output broadcast channel.
     pub fn subscribe(&self) -> broadcast::Receiver<Vec<u8>> {
         self.output_tx.subscribe()
     }
@@ -80,13 +85,12 @@ impl Terminal {
         self.closed_rx.clone()
     }
 
+    /// Queue bytes to be written to the PTY.
     pub async fn write(&self, data: Vec<u8>) -> Result<(), String> {
-        self.input_tx
-            .send(data)
-            .await
-            .map_err(|e| e.to_string())
+        self.input_tx.send(data).await.map_err(|e| e.to_string())
     }
 
+    /// Set the PTY window size (rows x cols).
     pub fn resize(&self, rows: u16, cols: u16) -> std::io::Result<()> {
         crate::pty::set_window_size(&*self.fd, rows, cols)
     }
@@ -102,10 +106,7 @@ impl Drop for Terminal {
     }
 }
 
-async fn read_loop(
-    fd: Arc<AsyncFd<std::os::fd::OwnedFd>>,
-    tx: broadcast::Sender<Vec<u8>>,
-) {
+async fn read_loop(fd: Arc<AsyncFd<std::os::fd::OwnedFd>>, tx: broadcast::Sender<Vec<u8>>) {
     let mut buf = [0u8; READ_BUF_SIZE];
     loop {
         let mut ready = match fd.readable().await {
@@ -135,10 +136,7 @@ async fn read_loop(
     }
 }
 
-async fn write_loop(
-    fd: Arc<AsyncFd<std::os::fd::OwnedFd>>,
-    mut rx: mpsc::Receiver<Vec<u8>>,
-) {
+async fn write_loop(fd: Arc<AsyncFd<std::os::fd::OwnedFd>>, mut rx: mpsc::Receiver<Vec<u8>>) {
     while let Some(data) = rx.recv().await {
         let mut written = 0;
         while written < data.len() {
@@ -169,12 +167,11 @@ async fn write_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::time::{timeout, Duration};
+    use tokio::time::{Duration, timeout};
 
     #[tokio::test]
     async fn test_write_and_read_output() {
-        let (terminal, mut rx) =
-            Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        let (terminal, mut rx) = Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
 
         terminal
             .write(b"echo hello_test_marker\n".to_vec())
@@ -201,21 +198,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_resize() {
-        let (terminal, _rx) =
-            Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        let (terminal, _rx) = Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
         terminal.resize(50, 132).expect("resize should succeed");
     }
 
     #[tokio::test]
     async fn test_closed_on_exit() {
-        let (terminal, _rx) =
-            Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        let (terminal, _rx) = Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
         let mut closed = terminal.closed();
 
-        terminal
-            .write(b"exit\n".to_vec())
-            .await
-            .unwrap();
+        terminal.write(b"exit\n".to_vec()).await.unwrap();
 
         let deadline = Duration::from_secs(3);
         let result = timeout(deadline, closed.wait_for(|&v| v)).await;

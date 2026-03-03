@@ -77,7 +77,13 @@ pub fn set_window_size(fd: impl AsFd, rows: u16, cols: u16) -> std::io::Result<(
     };
     // Safety: fd is a valid file descriptor (enforced by AsFd),
     // ws is a valid winsize struct on the stack.
-    let ret = unsafe { libc::ioctl(fd.as_fd().as_raw_fd(), libc::TIOCSWINSZ as libc::c_ulong, &ws) };
+    let ret = unsafe {
+        libc::ioctl(
+            fd.as_fd().as_raw_fd(),
+            libc::TIOCSWINSZ as libc::c_ulong,
+            &ws,
+        )
+    };
     if ret == -1 {
         Err(std::io::Error::last_os_error())
     } else {

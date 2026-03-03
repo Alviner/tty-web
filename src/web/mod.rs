@@ -1,3 +1,10 @@
+//! HTTP and WebSocket server built on [Axum](https://docs.rs/axum).
+//!
+//! Routes:
+//! - `GET /ws` — WebSocket endpoint (terminal I/O)
+//! - `GET /api/v1/ping` — health check
+//! - `GET /` and `GET /*path` — embedded static frontend
+
 mod health;
 mod static_files;
 mod ws;
@@ -9,12 +16,16 @@ use axum::routing::get;
 
 use crate::session::SessionStore;
 
+/// Shared state passed to all request handlers.
 #[derive(Clone)]
 pub struct AppState {
+    /// Shell binary path (e.g. `/bin/bash`).
     pub shell: String,
+    /// Global session registry.
     pub sessions: Arc<SessionStore>,
 }
 
+/// Build the Axum router with all routes and shared state.
 pub fn router(shell: String, sessions: Arc<SessionStore>) -> Router {
     let state = AppState { shell, sessions };
     Router::new()

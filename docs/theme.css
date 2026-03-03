@@ -1,0 +1,31 @@
+/* Sidebar logo above navigation */
+.sidebar-scrollbox::before {
+    content: "";
+    display: block;
+    width: 120px;
+    height: 109px;
+    margin: 20px auto 16px;
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.navy .sidebar-scrollbox::before {
+    background-image: url("images/logo-navy.svg");
+}
+
+.coal .sidebar-scrollbox::before {
+    background-image: url("images/logo-coal.svg");
+}
+
+.ayu .sidebar-scrollbox::before {
+    background-image: url("images/logo-ayu.svg");
+}
+
+.rust .sidebar-scrollbox::before {
+    background-image: url("images/logo-rust.svg");
+}
+
+.light .sidebar-scrollbox::before {
+    background-image: url("images/logo-light.svg");
+}

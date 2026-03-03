@@ -1,7 +1,13 @@
+//! CLI configuration parsed from flags and environment variables.
+
 use std::net::IpAddr;
 
 use clap::Parser;
 
+/// Application configuration.
+///
+/// Every field can be set via a CLI flag (`--address`) or an environment
+/// variable (`TTY_WEB_ADDRESS`). Defaults are suitable for local development.
 #[derive(Parser, Debug, Clone)]
 #[command(name = "tty-web", about = "Web-based terminal emulator")]
 pub struct Config {

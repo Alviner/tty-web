@@ -1,0 +1,27 @@
+name: tag
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Cargo.toml'
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Extract version and create tag
+        run: |
+          VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          TAG="v${VERSION}"
+          if git ls-remote --tags origin "${TAG}" | grep -q "${TAG}"; then
+            echo "Tag ${TAG} already exists, skipping"
+          else
+            echo "Creating tag ${TAG}"
+            git tag "${TAG}"
+            git push origin "${TAG}"
+          fi

@@ -1,3 +1,8 @@
+//! **tty-web** — web-based terminal emulator.
+//!
+//! Opens a real PTY in the browser over WebSocket. Each connection is backed by
+//! a persistent session that survives tab closes and reconnects.
+
 mod config;
 mod pty;
 mod session;

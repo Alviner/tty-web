@@ -5,6 +5,8 @@ on:
     branches: [master]
     paths:
       - 'docs/**'
+      - 'src/**'
+      - 'Cargo.toml'
       - '.github/workflows/docs.yaml'
   workflow_dispatch:
 
@@ -26,8 +28,16 @@ jobs:
         run: |
           curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.44/mdbook-v0.4.44-x86_64-unknown-linux-gnu.tar.gz \
             | tar -xz -C /usr/local/bin
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install mdbook-mermaid
+        run: cargo install --git https://github.com/Alviner/mdbook-mermaid
       - name: Build book
         run: mdbook build docs
+      - name: Build API reference
+        run: cargo doc --no-deps --document-private-items
+      - name: Copy API docs into book
+        run: rm -rf docs/book/api && cp -r target/doc docs/book/api
       - uses: actions/upload-pages-artifact@v3
         with:
           path: docs/book

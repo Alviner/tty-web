@@ -1,5 +1,6 @@
 # Wire Protocol
 
+
 All WebSocket messages are **binary frames**. The first byte is the command,
 the rest is the payload.
 
@@ -22,21 +23,22 @@ the rest is the payload.
 
 ## Handshake sequence
 
-```text
-Client                             Server
-  │                                  │
-  │──── WS connect (?sid=…&view) ───▶│
-  │                                  │  resolve / create session
-  │◀──── 0x10 Session ID ───────────│
-  │◀──── 0x11 Scrollback ──────────│  (if non-empty)
-  │                                  │
-  │◀──── 0x00 Output ──────────────│  ┐
-  │──── 0x00 Input ────────────────▶│  │ streaming
-  │──── 0x01 Resize ───────────────▶│  │
-  │◀──── 0x00 Output ──────────────│  ┘
-  │                                  │
-  │◀──── 0x12 Shell exited ────────│  (when shell process exits)
-  │                                  │
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant S as Server
+
+    C->>S: WS connect (?sid, view)
+    Note right of S: resolve / create session
+    S->>C: 0x10 Session ID
+    S-->>C: 0x11 Scrollback (if non-empty)
+    Note over C,S: streaming
+    S->>C: 0x00 Output
+    C->>S: 0x00 Input
+    C->>S: 0x01 Resize
+    S->>C: 0x00 Output
+    S->>C: 0x12 Shell exited
+    Note over C,S: connection closed
 ```
 
 1. The client opens a WebSocket to `/ws` with an optional `sid` query parameter

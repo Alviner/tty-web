@@ -44,12 +44,5 @@ A session is removed when:
   client disconnects), or
 - no client is attached for 60 seconds (orphan timeout).
 
-### Internal constants
-
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `SCROLLBACK_LIMIT` | 64 KB | Maximum scrollback buffer size |
-| `ORPHAN_TIMEOUT` | 60 s | Time before removing a session with no clients |
-| Reaper period | 1 s | How often the reaper checks each session |
-| `OUTPUT_CHANNEL_SIZE` | 64 | Broadcast channel capacity for output |
-| `INPUT_CHANNEL_SIZE` | 256 | Input mpsc channel capacity |
+For internal constants and implementation details, see the
+[API Reference](./api-reference.md).

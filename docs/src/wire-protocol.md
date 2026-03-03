@@ -29,22 +29,26 @@ sequenceDiagram
     participant C as Client
     participant S as Server
 
+    Note over C,S: 1. Handshake
     C->>S: WS connect (?sid, view)
     Note right of S: resolve / create session
     S->>C: 0x10 Session ID
     S->>C: 0x13 Window size
-    Note over C,S: replay
+
+    Note over C,S: 2. Replay
     S-->>C: 0x00 Output (scrollback)
     S-->>C: 0x13 Window size (scrollback)
     S->>C: 0x14 Replay end
-    Note over C,S: streaming
+
+    Note over C,S: 3. Streaming
     S->>C: 0x00 Output
     C->>S: 0x00 Input
     C->>S: 0x01 Resize
-    S->>C: 0x13 Window size (broadcast to viewers)
+    S->>C: 0x13 Window size (broadcast)
     S->>C: 0x00 Output
+
+    Note over C,S: 4. Shutdown
     S->>C: 0x12 Shell exited
-    Note over C,S: connection closed
 ```
 
 1. The client opens a WebSocket to `/ws` with an optional `sid` query parameter

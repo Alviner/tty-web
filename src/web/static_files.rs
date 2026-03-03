@@ -18,9 +18,7 @@ pub async fn index() -> impl IntoResponse {
     serve_file("index.html")
 }
 
-pub async fn static_file(
-    Path(path): Path<String>,
-) -> impl IntoResponse {
+pub async fn static_file(Path(path): Path<String>) -> impl IntoResponse {
     serve_file(&path)
 }
 
@@ -36,8 +34,7 @@ fn serve_file(path: &str) -> Response {
     let content_type = HeaderValue::from_str(&mime)
         .unwrap_or(HeaderValue::from_static("application/octet-stream"));
 
-    let mut response =
-        Response::new(Body::from(file.data.to_vec()));
+    let mut response = Response::new(Body::from(file.data.to_vec()));
     response
         .headers_mut()
         .insert(header::CONTENT_TYPE, content_type);

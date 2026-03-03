@@ -45,10 +45,14 @@ mod tests {
     fn test_custom_values() {
         let config = Config::parse_from([
             "tty-web",
-            "--port", "8080",
-            "--shell", "/bin/sh",
-            "--address", "0.0.0.0",
-            "--log-level", "debug",
+            "--port",
+            "8080",
+            "--shell",
+            "/bin/sh",
+            "--address",
+            "0.0.0.0",
+            "--log-level",
+            "debug",
         ]);
         assert_eq!(config.address, "0.0.0.0".parse::<IpAddr>().unwrap());
         assert_eq!(config.port, 8080);

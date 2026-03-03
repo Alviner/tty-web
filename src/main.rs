@@ -13,18 +13,23 @@ use clap::Parser;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
-use crate::config::Config;
+use crate::config::{Config, LogFormat};
 use crate::session::SessionStore;
 
 #[tokio::main]
 async fn main() {
     let config = Config::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level)),
-        )
-        .init();
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.log_level));
+
+    match config.log_format {
+        LogFormat::Text => tracing_subscriber::fmt().with_env_filter(filter).init(),
+        LogFormat::Json => tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(filter)
+            .init(),
+    };
 
     let sessions = SessionStore::new();
     let addr = std::net::SocketAddr::new(config.address, config.port);

@@ -12,7 +12,7 @@ nix = { version = "0.31", features = ["term", "fs", "signal"] }
 rust-embed = "8"
 clap = { version = "4", features = ["derive", "env"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 serde = { version = "1", features = ["derive"] }
 mime_guess = "2"
 uuid = { version = "1", features = ["v4"] }

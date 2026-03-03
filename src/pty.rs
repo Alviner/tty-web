@@ -74,3 +74,30 @@ pub fn set_window_size(fd: impl AsFd, rows: u16, cols: u16) -> std::io::Result<(
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_spawn_and_child_alive() {
+        let mut pty = PtyMaster::spawn("/bin/sh").expect("spawn /bin/sh");
+        // Child should still be running
+        assert!(
+            pty.child.try_wait().unwrap().is_none(),
+            "child should be alive"
+        );
+        // Cleanup
+        let _ = pty.child.kill();
+        let _ = pty.child.wait();
+    }
+
+    #[test]
+    fn test_set_window_size() {
+        let mut pty = PtyMaster::spawn("/bin/sh").expect("spawn /bin/sh");
+        set_window_size(&pty.master, 40, 120)
+            .expect("set_window_size should succeed");
+        let _ = pty.child.kill();
+        let _ = pty.child.wait();
+    }
+}

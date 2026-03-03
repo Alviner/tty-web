@@ -147,3 +147,86 @@ impl SessionStore {
         self.sessions.read().unwrap().get(id).cloned()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spawn_session() -> Arc<Session> {
+        let (terminal, output_rx) =
+            Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        Session::new(terminal, output_rx)
+    }
+
+    #[tokio::test]
+    async fn test_attach_detach_clients() {
+        let session = spawn_session();
+
+        let (_sb1, _rx1) = session.attach();
+        assert_eq!(session.clients.load(Ordering::Relaxed), 1);
+
+        let (_sb2, _rx2) = session.attach();
+        assert_eq!(session.clients.load(Ordering::Relaxed), 2);
+
+        session.detach();
+        assert_eq!(session.clients.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn test_not_orphaned_with_clients() {
+        let session = spawn_session();
+        let (_sb, _rx) = session.attach();
+        assert!(!session.is_orphaned());
+    }
+
+    #[tokio::test]
+    async fn test_not_orphaned_immediately_after_detach() {
+        let session = spawn_session();
+        let (_sb, _rx) = session.attach();
+        session.detach();
+        // Timeout hasn't elapsed yet
+        assert!(!session.is_orphaned());
+    }
+
+    #[tokio::test]
+    async fn test_orphaned_after_timeout() {
+        let session = spawn_session();
+        let (_sb, _rx) = session.attach();
+        session.detach();
+        // Simulate that detach happened 61 seconds ago
+        *session.detached_at.lock().unwrap() =
+            Some(Instant::now() - ORPHAN_TIMEOUT - std::time::Duration::from_secs(1));
+        assert!(session.is_orphaned());
+    }
+
+    #[tokio::test]
+    async fn test_scrollback_captures_output() {
+        let session = spawn_session();
+
+        session
+            .terminal
+            .write(b"echo scrollback_test_marker\n".to_vec())
+            .await
+            .unwrap();
+
+        // Give the shell time to produce output
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        let (scrollback, _rx) = session.attach();
+        let text = String::from_utf8_lossy(&scrollback);
+        assert!(
+            text.contains("scrollback_test_marker"),
+            "scrollback should contain marker, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_session_store_insert_and_get() {
+        let store = SessionStore::new();
+        let session = spawn_session();
+        let id = store.insert(session);
+
+        assert!(store.get(&id).is_some());
+        assert!(store.get("nonexistent").is_none());
+    }
+}

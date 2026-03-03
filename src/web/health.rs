@@ -13,3 +13,15 @@ pub async fn ping() -> Json<HealthResponse> {
         version: env!("CARGO_PKG_VERSION"),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_ping() {
+        let Json(resp) = ping().await;
+        assert_eq!(resp.status, "ok");
+        assert_eq!(resp.version, env!("CARGO_PKG_VERSION"));
+    }
+}

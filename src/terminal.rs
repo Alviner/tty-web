@@ -165,3 +165,63 @@ async fn write_loop(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::time::{timeout, Duration};
+
+    #[tokio::test]
+    async fn test_write_and_read_output() {
+        let (terminal, mut rx) =
+            Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+
+        terminal
+            .write(b"echo hello_test_marker\n".to_vec())
+            .await
+            .unwrap();
+
+        let mut collected = String::new();
+        let deadline = Duration::from_secs(3);
+        let _ = timeout(deadline, async {
+            while let Ok(data) = rx.recv().await {
+                collected.push_str(&String::from_utf8_lossy(&data));
+                if collected.contains("hello_test_marker") {
+                    break;
+                }
+            }
+        })
+        .await;
+
+        assert!(
+            collected.contains("hello_test_marker"),
+            "expected output to contain marker, got: {collected}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resize() {
+        let (terminal, _rx) =
+            Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        terminal.resize(50, 132).expect("resize should succeed");
+    }
+
+    #[tokio::test]
+    async fn test_closed_on_exit() {
+        let (terminal, _rx) =
+            Terminal::spawn("/bin/sh").expect("spawn /bin/sh");
+        let mut closed = terminal.closed();
+
+        terminal
+            .write(b"exit\n".to_vec())
+            .await
+            .unwrap();
+
+        let deadline = Duration::from_secs(3);
+        let result = timeout(deadline, closed.wait_for(|&v| v)).await;
+        assert!(
+            result.is_ok(),
+            "closed signal should be received after exit"
+        );
+    }
+}

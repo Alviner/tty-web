@@ -1,0 +1,13 @@
+[book]
+title = "tty-web"
+description = "Web-based terminal emulator"
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "navy"
+git-repository-url = "https://github.com/Alviner/tty-web"
+edit-url-template = "https://github.com/Alviner/tty-web/edit/master/docs/{path}"

@@ -44,6 +44,10 @@ pub struct Config {
     /// Working directory for new shell sessions
     #[arg(long, env = "TTY_WEB_PWD")]
     pub pwd: Option<PathBuf>,
+
+    /// Scrollback buffer size in KiB (default: 256)
+    #[arg(long, default_value_t = 256, env = "TTY_WEB_SCROLLBACK_LIMIT")]
+    pub scrollback_limit: usize,
 }
 
 #[cfg(test)]

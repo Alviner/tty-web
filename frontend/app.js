@@ -1,109 +1,85 @@
 "use strict";
 
-var log = (function () {
-  var PREFIX = "[tty-web]";
+// ── Protocol ──────────────────────────────────────────────────────────
 
-  function fmt(ctx) {
-    if (!ctx) return PREFIX;
-    var parts = [PREFIX];
-    for (var k in ctx) parts.push(k + "=" + ctx[k]);
-    return parts.join(" ");
-  }
+const CMD_INPUT = 0x00;
+const CMD_RESIZE = 0x01;
 
-  function create(ctx) {
-    var tag = fmt(ctx);
-    return {
-      info:  function () { var a = [].slice.call(arguments); a.unshift(tag); console.log.apply(console, a); },
-      warn:  function () { var a = [].slice.call(arguments); a.unshift(tag); console.warn.apply(console, a); },
-      error: function () { var a = [].slice.call(arguments); a.unshift(tag); console.error.apply(console, a); },
-      debug: function () { var a = [].slice.call(arguments); a.unshift(tag); console.debug.apply(console, a); },
-      child: function (extra) {
-        var merged = {};
-        if (ctx) for (var k in ctx) merged[k] = ctx[k];
-        for (var k2 in extra) merged[k2] = extra[k2];
-        return create(merged);
-      },
-    };
-  }
-
-  return create();
-})();
-
-var CMD_INPUT = 0x00;
-var CMD_RESIZE = 0x01;
-
-var CMD_OUTPUT = 0x00;
-var CMD_SESSION_ID = 0x10;
-var CMD_SCROLLBACK = 0x11;
-var CMD_SHELL_EXIT = 0x12;
+const CMD_OUTPUT = 0x00;
+const CMD_SESSION_ID = 0x10;
+const CMD_SCROLLBACK = 0x11;
+const CMD_SHELL_EXIT = 0x12;
+const CMD_WINDOW_SIZE = 0x13;
 
 // WebSocket close codes (4000–4999: application-specific)
-var CLOSE_SESSION_NOT_FOUND = 4404;
+const CLOSE_SESSION_NOT_FOUND = 4404;
 
-var RECONNECT_BASE_MS = 1000;
-var RECONNECT_MAX_MS = 5000;
+const RECONNECT_BASE_MS = 1000;
+const RECONNECT_MAX_MS = 5000;
 
-function buildInputFrame(data) {
-  var encoder = new TextEncoder();
-  var encoded = typeof data === "string" ? encoder.encode(data) : data;
-  var frame = new Uint8Array(1 + encoded.length);
+const buildInputFrame = (data) => {
+  const encoder = new TextEncoder();
+  const encoded = typeof data === "string" ? encoder.encode(data) : data;
+  const frame = new Uint8Array(1 + encoded.length);
   frame[0] = CMD_INPUT;
   frame.set(encoded, 1);
   return frame;
-}
+};
 
-function buildResizeFrame(rows, cols) {
-  var frame = new Uint8Array(5);
+const buildResizeFrame = (rows, cols) => {
+  const frame = new Uint8Array(5);
   frame[0] = CMD_RESIZE;
   frame[1] = (rows >> 8) & 0xff;
   frame[2] = rows & 0xff;
   frame[3] = (cols >> 8) & 0xff;
   frame[4] = cols & 0xff;
   return frame;
-}
+};
 
-function main() {
-  var term = new Terminal({
-    allowProposedApi: true,
-    fontFamily:
-      "'LigaHack Nerd Font', monospace",
-    fontSize: 14,
-    theme: {
-      background: "#1a1b26",
-      foreground: "#c0caf5",
-      cursor: "#c0caf5",
-      cursorAccent: "#1a1b26",
-    },
-  });
+// ── Logger ────────────────────────────────────────────────────────────
 
-  var fitAddon = new FitAddon.FitAddon();
-  var webLinksAddon = new WebLinksAddon.WebLinksAddon();
+const createLogger = () => {
+  const PREFIX = "[tty-web]";
 
-  term.loadAddon(fitAddon);
-  term.loadAddon(webLinksAddon);
-  term.open(document.getElementById("terminal"));
-  term.focus();
-  fitAddon.fit();
+  const fmt = (ctx) => {
+    if (!ctx) return PREFIX;
+    const parts = [PREFIX];
+    for (const k in ctx) parts.push(`${k}=${ctx[k]}`);
+    return parts.join(" ");
+  };
 
-  // Ligatures: enable OpenType contextual alternates and register
-  // a character joiner so xterm.js draws ligature sequences as a
-  // single text run, letting the font apply substitution rules.
-  var LIGATURES = [
-    "<!--", "<!---", "===", "!==", ">>>", "<<<", "<-->", "-->",
-    "<--", "<->", "=>", "->", "<-", ">=", "<=", "!=", "::", "...",
-    "/*", "*/", "//", "++", "+++", "||", "&&", "??", "?.", "|>",
-    "<|", "<|>", "<*", "<*>", "*>", "<:", ":>", ":=", "=:", "=~",
-    "!~", "<<", ">>", "==", "--", "++"
-  ].sort(function (a, b) { return b.length - a.length; });
+  const create = (ctx) => {
+    const tag = fmt(ctx);
+    return {
+      info:  (...args) => console.log(tag, ...args),
+      warn:  (...args) => console.warn(tag, ...args),
+      error: (...args) => console.error(tag, ...args),
+      debug: (...args) => console.debug(tag, ...args),
+      child: (extra) => create({ ...ctx, ...extra }),
+    };
+  };
 
+  return create();
+};
+
+// ── Terminal ──────────────────────────────────────────────────────────
+
+const LIGATURES = [
+  "<!--", "<!---", "===", "!==", ">>>", "<<<", "<-->", "-->",
+  "<--", "<->", "=>", "->", "<-", ">=", "<=", "!=", "::", "...",
+  "/*", "*/", "//", "++", "+++", "||", "&&", "??", "?.", "|>",
+  "<|", "<|>", "<*", "<*>", "*>", "<:", ":>", ":=", "=:", "=~",
+  "!~", "<<", ">>", "==", "--", "++"
+].sort((a, b) => b.length - a.length);
+
+const setupLigatures = (term) => {
   term.element.style.fontFeatureSettings = '"calt" on';
-  term.registerCharacterJoiner(function (text) {
-    var ranges = [];
-    var i = 0;
+  term.registerCharacterJoiner((text) => {
+    const ranges = [];
+    let i = 0;
     while (i < text.length) {
-      var matched = false;
-      for (var j = 0; j < LIGATURES.length; j++) {
-        var lig = LIGATURES[j];
+      let matched = false;
+      for (const lig of LIGATURES) {
         if (text.substring(i, i + lig.length) === lig) {
           ranges.push([i, i + lig.length]);
           i += lig.length;
@@ -115,51 +91,89 @@ function main() {
     }
     return ranges;
   });
+};
 
-  var readonly = new URLSearchParams(location.search).has("view");
+const createTerminal = () => {
+  const term = new Terminal({
+    allowProposedApi: true,
+    fontFamily: "'LigaHack Nerd Font', monospace",
+    fontSize: 14,
+    theme: {
+      background: "#1a1b26",
+      foreground: "#c0caf5",
+      cursor: "#c0caf5",
+      cursorAccent: "#1a1b26",
+    },
+  });
 
-  var sbSid = document.getElementById("sb-sid");
-  var sbMode = document.getElementById("sb-mode");
-  var sbStatus = document.getElementById("sb-status");
-  var sbCopy = document.getElementById("sb-copy");
-  var sbView = document.getElementById("sb-view");
-  var sbNew = document.getElementById("sb-new");
-  var currentSid = getSid();
+  const fitAddon = new FitAddon.FitAddon();
+  const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+
+  term.loadAddon(fitAddon);
+  term.loadAddon(webLinksAddon);
+  term.open(document.getElementById("terminal"));
+  term.focus();
+  fitAddon.fit();
+
+  setupLigatures(term);
+
+  return { term, fitAddon };
+};
+
+// ── Status Bar ────────────────────────────────────────────────────────
+
+const STATUS_ICONS = { green: "\uF00C", yellow: "\uF252", red: "\uF00D" };
+
+const createStatusBar = (readonly) => {
+  const sbSid = document.getElementById("sb-sid");
+  const sbMode = document.getElementById("sb-mode");
+  const sbStatus = document.getElementById("sb-status");
+  const sbCopy = document.getElementById("sb-copy");
+  const sbView = document.getElementById("sb-view");
+  const sbNew = document.getElementById("sb-new");
 
   sbMode.textContent = readonly ? "\uF06E view" : "\uF11C interactive";
 
-  var STATUS_ICONS = { green: "\uF00C", yellow: "\uF252", red: "\uF00D" };
-  function setStatus(label, color) {
-    sbStatus.innerHTML = '<span class="sb-' + color + '">' + (STATUS_ICONS[color] || "") + '</span> ' + label;
-  }
-  setStatus("connecting", "yellow");
+  const setStatus = (label, color) => {
+    sbStatus.innerHTML = `<span class="sb-${color}">${STATUS_ICONS[color] || ""}</span> ${label}`;
+  };
 
-  var ws = null;
-  var reconnectDelay = RECONNECT_BASE_MS;
-  var resizeSent = false;
-  var shellExited = false;
-  var replaying = false;
-  var wsLog = log;
+  const setSid = (sid) => {
+    sbSid.textContent = `\uF489 ${sid.substring(0, 8)}`;
+    sbCopy.disabled = false;
+    sbView.disabled = false;
+  };
 
-  function sendResize() {
+  return { setStatus, setSid, sbCopy, sbView, sbNew };
+};
+
+// ── Connection ────────────────────────────────────────────────────────
+
+const connect = (ctx) => {
+  const { term, statusBar, log, readonly } = ctx;
+
+  let ws = null;
+  let reconnectDelay = RECONNECT_BASE_MS;
+  let resizeSent = false;
+  let shellExited = false;
+  let replaying = false;
+  let currentSid = new URLSearchParams(location.search).get("sid");
+  let wsLog = log;
+
+  const sendResize = () => {
     if (readonly) return;
     if (!resizeSent && ws && ws.readyState === WebSocket.OPEN) {
       ws.send(buildResizeFrame(term.rows, term.cols));
       resizeSent = true;
     }
-  }
+  };
 
-  function getSid() {
-    var params = new URLSearchParams(location.search);
-    return params.get("sid");
-  }
-
-  function connect() {
-    var protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    var wsUrl = protocol + "//" + location.host + "/ws";
-    var sid = getSid();
+  const openWs = () => {
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    let wsUrl = `${protocol}//${location.host}/ws`;
+    const sid = new URLSearchParams(location.search).get("sid");
     if (sid) {
-      wsUrl += "?sid=" + encodeURIComponent(sid);
+      wsUrl += `?sid=${encodeURIComponent(sid)}`;
     }
     if (readonly) {
       wsUrl += (sid ? "&" : "?") + "view";
@@ -167,27 +181,27 @@ function main() {
     ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
 
-    ws.onopen = function () {
+    ws.onopen = () => {
       reconnectDelay = RECONNECT_BASE_MS;
       resizeSent = false;
-      setStatus("connected", "green");
+      statusBar.setStatus("connected", "green");
       wsLog.info("connected");
     };
 
-    ws.onmessage = function (event) {
-      var data = new Uint8Array(event.data);
+    ws.onmessage = (event) => {
+      const data = new Uint8Array(event.data);
       if (data.length < 1) return;
 
-      var cmd = data[0];
-      var payload = data.subarray(1);
+      const cmd = data[0];
+      const payload = data.subarray(1);
 
       switch (cmd) {
         case CMD_OUTPUT:
           term.write(payload);
           break;
-        case CMD_SESSION_ID:
-          var newSid = new TextDecoder().decode(payload);
-          var isReattach = newSid === currentSid;
+        case CMD_SESSION_ID: {
+          const newSid = new TextDecoder().decode(payload);
+          const isReattach = newSid === currentSid;
           wsLog = log.child({ sid: newSid.substring(0, 8) });
           wsLog.info("session", isReattach ? "(reattach)" : "(new)");
           if (!isReattach) {
@@ -195,112 +209,122 @@ function main() {
             sendResize();
           }
           currentSid = newSid;
-          var newUrl = "/?sid=" + newSid + (readonly ? "&view" : "");
-          history.replaceState(null, "", newUrl);
-          sbSid.textContent = "\uF489 " + newSid.substring(0, 8);
-          sbCopy.disabled = false;
-          sbView.disabled = false;
+          history.replaceState(null, "", `/?sid=${newSid}${readonly ? "&view" : ""}`);
+          statusBar.setSid(newSid);
           break;
+        }
         case CMD_SCROLLBACK:
           wsLog.info("scrollback:", payload.length, "bytes");
           replaying = true;
           term.reset();
-          term.write(payload, function () {
+          term.write(payload, () => {
             term.write("\x1b[?25h");
             replaying = false;
             sendResize();
           });
           break;
+        case CMD_WINDOW_SIZE:
+          if (readonly && payload.length >= 4) {
+            const rows = (payload[0] << 8) | payload[1];
+            const cols = (payload[2] << 8) | payload[3];
+            term.resize(cols, rows);
+          }
+          break;
         case CMD_SHELL_EXIT:
           shellExited = true;
           wsLog.info("shell exited");
           term.write("\r\n\x1b[90m[Shell exited.]\x1b[0m\r\n");
-          setStatus("exited", "red");
+          statusBar.setStatus("exited", "red");
           break;
       }
     };
 
-    ws.onclose = function (ev) {
+    ws.onclose = (ev) => {
       if (ev.code === CLOSE_SESSION_NOT_FOUND) {
         wsLog.warn("session not found, code:", ev.code);
         term.write("\r\n\x1b[90m[Session not found.]\x1b[0m\r\n");
-        setStatus("no session", "red");
+        statusBar.setStatus("no session", "red");
         return;
       }
       if (shellExited) return;
       wsLog.info("disconnected, code:", ev.code);
-      setStatus("reconnecting", "yellow");
+      statusBar.setStatus("reconnecting", "yellow");
       term.write(
-        "\r\n\x1b[33m[Disconnected. Reconnecting in " +
-          Math.round(reconnectDelay / 1000) +
-          "s...]\x1b[0m\r\n"
+        `\r\n\x1b[33m[Disconnected. Reconnecting in ${Math.round(reconnectDelay / 1000)}s...]\x1b[0m\r\n`
       );
-      setTimeout(connect, reconnectDelay);
-      reconnectDelay = Math.min(
-        reconnectDelay * 2,
-        RECONNECT_MAX_MS
-      );
+      setTimeout(openWs, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
     };
 
-    ws.onerror = function () { wsLog.error("websocket error"); };
-  }
+    ws.onerror = () => { wsLog.error("websocket error"); };
+  };
 
-  term.onData(function (data) {
+  // Terminal input handlers
+  term.onData((data) => {
     if (readonly || replaying) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(buildInputFrame(data));
     }
   });
 
-  term.onBinary(function (data) {
+  term.onBinary((data) => {
     if (readonly || replaying) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      var bytes = new Uint8Array(data.length);
-      for (var i = 0; i < data.length; i++) {
+      const bytes = new Uint8Array(data.length);
+      for (let i = 0; i < data.length; i++) {
         bytes[i] = data.charCodeAt(i);
       }
       ws.send(buildInputFrame(bytes));
     }
   });
 
-  term.onResize(function (size) {
+  term.onResize((size) => {
     if (readonly) return;
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(buildResizeFrame(size.rows, size.cols));
     }
   });
 
-  var resizeObserver = new ResizeObserver(function () {
-    fitAddon.fit();
-  });
-  resizeObserver.observe(document.getElementById("terminal"));
-
-  function flashButton(btn, original) {
+  // Status bar button handlers
+  const flashButton = (btn, original) => {
     btn.textContent = "Copied!";
-    setTimeout(function () { btn.textContent = original; }, 1500);
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  };
+
+  statusBar.sbCopy.addEventListener("click", async () => {
+    if (!currentSid) return;
+    await navigator.clipboard.writeText(`${location.origin}/?sid=${currentSid}`);
+    flashButton(statusBar.sbCopy, "\uF0C1 Copy link");
+  });
+
+  statusBar.sbView.addEventListener("click", async () => {
+    if (!currentSid) return;
+    await navigator.clipboard.writeText(`${location.origin}/?sid=${currentSid}&view`);
+    flashButton(statusBar.sbView, "\uF06E View link");
+  });
+
+  statusBar.sbNew.addEventListener("click", () => {
+    location.href = `${location.origin}/`;
+  });
+
+  openWs();
+};
+
+// ── Main ──────────────────────────────────────────────────────────────
+
+const main = () => {
+  const log = createLogger();
+  const readonly = new URLSearchParams(location.search).has("view");
+  const { term, fitAddon } = createTerminal();
+  const statusBar = createStatusBar(readonly);
+
+  statusBar.setStatus("connecting", "yellow");
+
+  if (!readonly) {
+    new ResizeObserver(() => fitAddon.fit()).observe(document.getElementById("terminal"));
   }
 
-  sbCopy.addEventListener("click", function () {
-    if (!currentSid) return;
-    var url = location.origin + "/?sid=" + currentSid;
-    navigator.clipboard.writeText(url).then(function () {
-      flashButton(sbCopy, "\uF0C1 Copy link");
-    });
-  });
-
-  sbView.addEventListener("click", function () {
-    if (!currentSid) return;
-    var url = location.origin + "/?sid=" + currentSid + "&view";
-    navigator.clipboard.writeText(url).then(function () {
-      flashButton(sbView, "\uF06E View link");
-    });
-  });
-
-  sbNew.addEventListener("click", function () {
-    location.href = location.origin + "/";
-  });
-
-  connect();
-}
+  connect({ term, statusBar, log, readonly });
+};
 
 document.addEventListener("DOMContentLoaded", main);

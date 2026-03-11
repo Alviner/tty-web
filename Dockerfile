@@ -5,15 +5,13 @@ ENTRYPOINT ["/tty-web"]
 
 FROM --platform=$BUILDPLATFORM ubuntu:24.04@sha256:d1e2e92c075e5ca139d51a140fff46f84315c0fdce203eab2807c7e495eff4f9 AS playground
 
-ARG UBUNTU_SNAPSHOT=20260301T000000Z
-
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8
 ENV TERM=xterm-256color
 
 RUN --mount=type=cache,target=/var/lib/apt/lists \
     apt install -y --update ca-certificates && \
-    apt install -y --update --snapshot ${UBUNTU_SNAPSHOT} --no-install-recommends \
+    apt install -y --update --no-install-recommends \
     curl \
     git \
     htop \
@@ -22,10 +20,11 @@ RUN --mount=type=cache,target=/var/lib/apt/lists \
     vim \
     zsh
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-RUN uv python install 3.13 \
-    && ln -s $(uv python find 3.13) /usr/local/bin/python3 \
-    && ln -s /usr/local/bin/python3 /usr/local/bin/python
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+RUN uv python install 3.14 --compile-bytecode \
+    && for bin in $(dirname $(uv python find 3.14))/*; do \
+        ln -s "$bin" /usr/local/bin/$(basename "$bin"); \
+    done
 
 RUN curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell \
     && export PATH="/root/.local/share/fnm:${PATH}" \

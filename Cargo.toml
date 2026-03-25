@@ -2,8 +2,24 @@
 name = "tty-web"
 version = "0.15.1"
 edition = "2024"
-description = "Web-based terminal emulator"
-license = "MIT"
+rust-version = "1.85"
+description = "Web-based terminal emulator — opens a real PTY in the browser over WebSocket"
+license-file = "LICENSE"
+repository = "https://github.com/Alviner/tty-web"
+homepage = "https://github.com/Alviner/tty-web"
+documentation = "https://alviner.github.io/tty-web"
+readme = "README.md"
+keywords = ["terminal", "pty", "websocket", "tty", "web"]
+categories = ["command-line-utilities", "web-programming::websocket"]
+authors = ["Ivan Sitkin <alvinera@yandex.ru>"]
+exclude = [
+    "demo.gif",
+    "docs/",
+    ".github/",
+    ".dockerignore",
+    "Dockerfile",
+    "Makefile",
+]
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }

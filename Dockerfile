@@ -45,7 +45,7 @@ ENV PATH="/usr/local/cargo/bin:${PATH}"
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
     | sh -s -- -y --default-toolchain stable --profile minimal
 
-ARG NVIM_VERSION=0.10.4
+ARG NVIM_VERSION=0.12.0
 RUN ARCH=$(uname -m) && [ "$ARCH" = "aarch64" ] && ARCH=arm64; \
     curl -fsSL "https://github.com/neovim/neovim/releases/download/v${NVIM_VERSION}/nvim-linux-${ARCH}.tar.gz" \
     | tar -C /usr/local --strip-components=1 -xz

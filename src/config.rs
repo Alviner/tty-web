@@ -48,6 +48,10 @@ pub struct Config {
     /// Scrollback buffer size in KiB (default: 256)
     #[arg(long, default_value_t = 256, env = "TTY_WEB_SCROLLBACK_LIMIT")]
     pub scrollback_limit: usize,
+
+    /// Session orphan timeout in seconds — remove session after this long with no clients
+    #[arg(long, default_value_t = 60, env = "TTY_WEB_ORPHAN_TIMEOUT")]
+    pub orphan_timeout: u64,
 }
 
 #[cfg(test)]
@@ -63,6 +67,8 @@ mod tests {
         assert_eq!(config.log_level, "info");
         assert_eq!(config.log_format, LogFormat::Text);
         assert_eq!(config.pwd, None);
+        assert_eq!(config.scrollback_limit, 256);
+        assert_eq!(config.orphan_timeout, 60);
     }
 
     #[test]

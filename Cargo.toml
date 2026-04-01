@@ -1,6 +1,6 @@
 [package]
 name = "tty-web"
-version = "0.15.1"
+version = "0.16.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Web-based terminal emulator — opens a real PTY in the browser over WebSocket"

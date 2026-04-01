@@ -56,6 +56,7 @@ impl ScrollbackEvent {
 /// Tracks connected clients, buffers recent output for replay on reconnect,
 /// and detects when the session becomes orphaned.
 pub struct Session {
+    id: String,
     pub terminal: Terminal,
     scrollback: Mutex<VecDeque<ScrollbackEvent>>,
     scrollback_bytes: Mutex<usize>,
@@ -77,8 +78,10 @@ impl Session {
         scrollback_limit: usize,
         orphan_timeout: std::time::Duration,
     ) -> Arc<Self> {
+        let id = uuid::Uuid::new_v4().to_string();
         let (ws_tx, _) = watch::channel((24, 80));
         let session = Arc::new(Self {
+            id,
             terminal,
             scrollback: Mutex::new(VecDeque::new()),
             scrollback_bytes: Mutex::new(0),
@@ -110,6 +113,11 @@ impl Session {
         });
 
         session
+    }
+
+    /// Session identifier.
+    pub fn id(&self) -> &str {
+        &self.id
     }
 
     /// Push an event into the scrollback ring buffer, evicting old events
@@ -184,19 +192,17 @@ impl SessionStore {
         })
     }
 
-    /// Register a session under a new UUID and spawn a reaper task that
-    /// removes it when the shell exits with no clients or the orphan timeout
-    /// elapses.
-    pub fn insert(self: &Arc<Self>, session: Arc<Session>) -> String {
-        let id = uuid::Uuid::new_v4().to_string();
+    /// Register a session and spawn a reaper task that removes it when the
+    /// shell exits with no clients or the orphan timeout elapses.
+    pub fn insert(self: &Arc<Self>, session: Arc<Session>) {
+        let sid = session.id().to_owned();
         self.sessions
             .write()
             .unwrap()
-            .insert(id.clone(), session.clone());
+            .insert(sid.clone(), session.clone());
 
         // Reaper task: periodically checks for removal conditions
         let store = Arc::downgrade(self);
-        let sid = id.clone();
         let closed_rx = session.terminal.closed();
         tokio::spawn(async move {
             loop {
@@ -219,8 +225,6 @@ impl SessionStore {
                 }
             }
         });
-
-        id
     }
 
     /// Look up a session by ID.
@@ -315,7 +319,8 @@ mod tests {
     async fn test_session_store_insert_and_get() {
         let store = SessionStore::new();
         let session = spawn_session();
-        let id = store.insert(session);
+        let id = session.id().to_owned();
+        store.insert(session);
 
         assert!(store.get(&id).is_some());
         assert!(store.get("nonexistent").is_none());

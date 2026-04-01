@@ -18,8 +18,8 @@ use tokio::sync::{broadcast, watch};
 
 use crate::terminal::Terminal;
 
-/// Time without any attached clients before a session is reaped.
-const ORPHAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+/// Default time without any attached clients before a session is reaped.
+pub const DEFAULT_ORPHAN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 /// Return type of [`Session::attach`]: scrollback events, output stream,
 /// and window-size watch.
@@ -63,14 +63,19 @@ pub struct Session {
     clients: AtomicUsize,
     detached_at: Mutex<Option<Instant>>,
     window_size: watch::Sender<(u16, u16)>,
+    orphan_timeout: std::time::Duration,
 }
 
 impl Session {
-    /// Create a new session and spawn a background scrollback collector task.
+    /// Create a new session.
+    ///
+    /// `orphan_timeout` controls how long a session with no attached clients
+    /// survives before the reaper removes it (default: [`DEFAULT_ORPHAN_TIMEOUT`]).
     pub fn new(
         terminal: Terminal,
         output_rx: broadcast::Receiver<Vec<u8>>,
         scrollback_limit: usize,
+        orphan_timeout: std::time::Duration,
     ) -> Arc<Self> {
         let (ws_tx, _) = watch::channel((24, 80));
         let session = Arc::new(Self {
@@ -81,6 +86,7 @@ impl Session {
             clients: AtomicUsize::new(0),
             detached_at: Mutex::new(None),
             window_size: ws_tx,
+            orphan_timeout,
         });
 
         // Scrollback collector
@@ -150,13 +156,18 @@ impl Session {
         }
     }
 
+    /// Number of currently attached clients.
+    pub fn client_count(&self) -> usize {
+        self.clients.load(Ordering::Relaxed)
+    }
+
     fn is_orphaned(&self) -> bool {
         self.clients.load(Ordering::Relaxed) == 0
             && self
                 .detached_at
                 .lock()
                 .unwrap()
-                .is_some_and(|t| t.elapsed() >= ORPHAN_TIMEOUT)
+                .is_some_and(|t| t.elapsed() >= self.orphan_timeout)
     }
 }
 
@@ -216,6 +227,11 @@ impl SessionStore {
     pub fn get(&self, id: &str) -> Option<Arc<Session>> {
         self.sessions.read().unwrap().get(id).cloned()
     }
+
+    /// Returns `true` if there are no active sessions.
+    pub fn is_empty(&self) -> bool {
+        self.sessions.read().unwrap().is_empty()
+    }
 }
 
 #[cfg(test)]
@@ -226,7 +242,7 @@ mod tests {
 
     fn spawn_session() -> Arc<Session> {
         let (terminal, output_rx) = Terminal::spawn("/bin/sh", None).expect("spawn /bin/sh");
-        Session::new(terminal, output_rx, TEST_SCROLLBACK_LIMIT)
+        Session::new(terminal, output_rx, TEST_SCROLLBACK_LIMIT, DEFAULT_ORPHAN_TIMEOUT)
     }
 
     #[tokio::test]
@@ -264,7 +280,7 @@ mod tests {
         let (_sb, _rx, _ws) = session.attach();
         session.detach();
         *session.detached_at.lock().unwrap() =
-            Some(Instant::now() - ORPHAN_TIMEOUT - std::time::Duration::from_secs(1));
+            Some(Instant::now() - session.orphan_timeout - std::time::Duration::from_secs(1));
         assert!(session.is_orphaned());
     }
 
@@ -303,7 +319,7 @@ mod tests {
     #[tokio::test]
     async fn test_scrollback_eviction_removes_whole_events() {
         let (terminal, output_rx) = Terminal::spawn("/bin/sh", None).expect("spawn");
-        let session = Session::new(terminal, output_rx, 10);
+        let session = Session::new(terminal, output_rx, 10, DEFAULT_ORPHAN_TIMEOUT);
 
         session.push_scrollback(ScrollbackEvent::Output(b"aaaaa".to_vec())); // 5
         session.push_scrollback(ScrollbackEvent::Output(b"bbbbb".to_vec())); // 5, total 10
@@ -326,7 +342,7 @@ mod tests {
     #[tokio::test]
     async fn test_set_window_size_records_event() {
         let (terminal, output_rx) = Terminal::spawn("/bin/sh", None).expect("spawn");
-        let session = Session::new(terminal, output_rx, TEST_SCROLLBACK_LIMIT);
+        let session = Session::new(terminal, output_rx, TEST_SCROLLBACK_LIMIT, DEFAULT_ORPHAN_TIMEOUT);
 
         session.set_window_size(40, 120);
 

@@ -3,18 +3,12 @@
 //! Opens a real PTY in the browser over WebSocket. Each connection is backed by
 //! a persistent session that survives tab closes and reconnects.
 
-mod config;
-mod pty;
-mod session;
-mod terminal;
-mod web;
-
 use clap::Parser;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
-use crate::config::{Config, LogFormat};
-use crate::session::SessionStore;
+use tty_web::config::{Config, LogFormat};
+use tty_web::session::SessionStore;
 
 #[tokio::main]
 async fn main() {
@@ -33,11 +27,13 @@ async fn main() {
 
     let sessions = SessionStore::new();
     let addr = std::net::SocketAddr::new(config.address, config.port);
-    let app = web::router(
+    let orphan_timeout = std::time::Duration::from_secs(config.orphan_timeout);
+    let app = tty_web::web::router(
         config.shell,
         config.pwd,
         config.scrollback_limit * 1024,
         sessions,
+        orphan_timeout,
     );
 
     let listener = TcpListener::bind(addr).await.unwrap_or_else(|e| {

@@ -6,5 +6,5 @@
 pub mod config;
 pub(crate) mod pty;
 pub mod session;
-pub(crate) mod terminal;
+pub mod terminal;
 pub mod web;

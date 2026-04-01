@@ -242,7 +242,12 @@ mod tests {
 
     fn spawn_session() -> Arc<Session> {
         let (terminal, output_rx) = Terminal::spawn("/bin/sh", None).expect("spawn /bin/sh");
-        Session::new(terminal, output_rx, TEST_SCROLLBACK_LIMIT, DEFAULT_ORPHAN_TIMEOUT)
+        Session::new(
+            terminal,
+            output_rx,
+            TEST_SCROLLBACK_LIMIT,
+            DEFAULT_ORPHAN_TIMEOUT,
+        )
     }
 
     #[tokio::test]
@@ -342,7 +347,12 @@ mod tests {
     #[tokio::test]
     async fn test_set_window_size_records_event() {
         let (terminal, output_rx) = Terminal::spawn("/bin/sh", None).expect("spawn");
-        let session = Session::new(terminal, output_rx, TEST_SCROLLBACK_LIMIT, DEFAULT_ORPHAN_TIMEOUT);
+        let session = Session::new(
+            terminal,
+            output_rx,
+            TEST_SCROLLBACK_LIMIT,
+            DEFAULT_ORPHAN_TIMEOUT,
+        );
 
         session.set_window_size(40, 120);
 

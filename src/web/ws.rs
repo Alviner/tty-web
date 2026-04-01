@@ -217,7 +217,12 @@ fn resolve_session(
     }
     let (terminal, output_rx) =
         Terminal::spawn(&state.shell, state.pwd.as_deref()).map_err(ResolveError::Io)?;
-    let session = Session::new(terminal, output_rx, state.scrollback_limit, state.orphan_timeout);
+    let session = Session::new(
+        terminal,
+        output_rx,
+        state.scrollback_limit,
+        state.orphan_timeout,
+    );
     let id = state.sessions.insert(session.clone());
     tracing::info!("created new session {id}");
     Ok((session, id))

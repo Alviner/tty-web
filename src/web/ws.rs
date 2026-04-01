@@ -86,7 +86,7 @@ async fn handle_socket(
     readonly: bool,
 ) {
     // Resolve or create session
-    let (session, session_id) = match resolve_session(&state, sid.as_deref()) {
+    let session = match resolve_session(&state, sid.as_deref()) {
         Ok(result) => result,
         Err(ResolveError::NotFound(id)) => {
             tracing::warn!("session {id} not found");
@@ -104,8 +104,21 @@ async fn handle_socket(
         }
     };
 
+    handle_session(&mut socket, &session, readonly).await;
+}
+
+/// Drive the tty-web binary protocol on an already-resolved session.
+///
+/// Performs the full handshake (session ID → window size → scrollback replay →
+/// replay-end marker), then bridges WebSocket I/O with the terminal until the
+/// client disconnects or the shell exits. Calls [`Session::attach`] /
+/// [`Session::detach`] automatically.
+///
+/// This is the main building block for embedding tty-web in other applications
+/// that manage session creation themselves.
+pub async fn handle_session(socket: &mut WebSocket, session: &Arc<Session>, readonly: bool) {
     // Handshake: session ID → window size → replay events → replay end
-    if send_frame(&mut socket, CMD_SESSION_ID, session_id.as_bytes())
+    if send_frame(socket, CMD_SESSION_ID, session.id().as_bytes())
         .await
         .is_err()
     {
@@ -115,13 +128,9 @@ async fn handle_socket(
     let (events, mut output_rx, mut window_size_rx) = session.attach();
 
     let (rows, cols) = *window_size_rx.borrow_and_update();
-    if send_frame(
-        &mut socket,
-        CMD_WINDOW_SIZE,
-        &encode_window_size(rows, cols),
-    )
-    .await
-    .is_err()
+    if send_frame(socket, CMD_WINDOW_SIZE, &encode_window_size(rows, cols))
+        .await
+        .is_err()
     {
         session.detach();
         return;
@@ -130,11 +139,9 @@ async fn handle_socket(
     // Replay scrollback events
     for event in &events {
         let ok = match event {
-            ScrollbackEvent::Output(data) => {
-                send_frame(&mut socket, CMD_OUTPUT, data).await.is_ok()
-            }
+            ScrollbackEvent::Output(data) => send_frame(socket, CMD_OUTPUT, data).await.is_ok(),
             ScrollbackEvent::WindowSize(r, c) => {
-                send_frame(&mut socket, CMD_WINDOW_SIZE, &encode_window_size(*r, *c))
+                send_frame(socket, CMD_WINDOW_SIZE, &encode_window_size(*r, *c))
                     .await
                     .is_ok()
             }
@@ -145,7 +152,7 @@ async fn handle_socket(
         }
     }
 
-    if send_frame(&mut socket, CMD_REPLAY_END, &[]).await.is_err() {
+    if send_frame(socket, CMD_REPLAY_END, &[]).await.is_err() {
         session.detach();
         return;
     }
@@ -157,7 +164,7 @@ async fn handle_socket(
             result = output_rx.recv() => {
                 match result {
                     Ok(data) => {
-                        if send_frame(&mut socket, CMD_OUTPUT, &data).await.is_err() {
+                        if send_frame(socket, CMD_OUTPUT, &data).await.is_err() {
                             break;
                         }
                     }
@@ -174,7 +181,7 @@ async fn handle_socket(
                         if readonly || data.is_empty() {
                             continue;
                         }
-                        handle_client_message(&session, &data).await;
+                        handle_client_message(session, &data).await;
                     }
                     Some(Ok(Message::Close(_))) | None => break,
                     _ => {}
@@ -182,18 +189,18 @@ async fn handle_socket(
             }
             Ok(()) = window_size_rx.changed() => {
                 let (rows, cols) = *window_size_rx.borrow_and_update();
-                if send_frame(&mut socket, CMD_WINDOW_SIZE, &encode_window_size(rows, cols)).await.is_err() {
+                if send_frame(socket, CMD_WINDOW_SIZE, &encode_window_size(rows, cols)).await.is_err() {
                     break;
                 }
             }
             _ = closed_rx.changed() => {
                 // Drain buffered output before sending exit
                 while let Ok(data) = output_rx.try_recv() {
-                    if send_frame(&mut socket, CMD_OUTPUT, &data).await.is_err() {
+                    if send_frame(socket, CMD_OUTPUT, &data).await.is_err() {
                         break;
                     }
                 }
-                let _ = send_frame(&mut socket, CMD_SHELL_EXIT, &[]).await;
+                let _ = send_frame(socket, CMD_SHELL_EXIT, &[]).await;
                 break;
             }
         }
@@ -201,18 +208,12 @@ async fn handle_socket(
     session.detach();
 }
 
-fn resolve_session(
-    state: &AppState,
-    sid: Option<&str>,
-) -> Result<(Arc<Session>, String), ResolveError> {
+fn resolve_session(state: &AppState, sid: Option<&str>) -> Result<Arc<Session>, ResolveError> {
     if let Some(sid) = sid {
         return state
             .sessions
             .get(sid)
-            .map(|session| {
-                tracing::info!("reattaching to session {sid}");
-                (session, sid.to_owned())
-            })
+            .inspect(|_| tracing::info!("reattaching to session {sid}"))
             .ok_or_else(|| ResolveError::NotFound(sid.to_owned()));
     }
     let (terminal, output_rx) =
@@ -223,9 +224,9 @@ fn resolve_session(
         state.scrollback_limit,
         state.orphan_timeout,
     );
-    let id = state.sessions.insert(session.clone());
-    tracing::info!("created new session {id}");
-    Ok((session, id))
+    tracing::info!("created new session {}", session.id());
+    state.sessions.insert(session.clone());
+    Ok(session)
 }
 
 #[derive(Debug, PartialEq)]

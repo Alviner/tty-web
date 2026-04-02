@@ -12,6 +12,7 @@ ENV TERM=xterm-256color
 RUN --mount=type=cache,target=/var/lib/apt/lists \
     apt install -y --update ca-certificates && \
     apt install -y --update --no-install-recommends \
+    build-essential \
     curl \
     git \
     htop \
@@ -50,7 +51,9 @@ RUN ARCH=$(uname -m) && [ "$ARCH" = "aarch64" ] && ARCH=arm64; \
     curl -fsSL "https://github.com/neovim/neovim/releases/download/v${NVIM_VERSION}/nvim-linux-${ARCH}.tar.gz" \
     | tar -C /usr/local --strip-components=1 -xz
 
-RUN git clone --depth 1 https://github.com/AstroNvim/template ~/.config/nvim \
+ARG ASTRONVIM_TEMPLATE_COMMIT=08e6b5a334f7a824fbc365bbb7268d53d35fd624
+RUN git clone https://github.com/AstroNvim/template ~/.config/nvim \
+    && cd ~/.config/nvim && git checkout "${ASTRONVIM_TEMPLATE_COMMIT}" \
     && nvim --headless "+Lazy! sync" +qa
 
 ARG OHMYZSH_COMMIT=41c5b9677afaf239268197546cfc8e003a073c97

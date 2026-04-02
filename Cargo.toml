@@ -1,10 +1,10 @@
 [package]
 name = "tty-web"
-version = "0.16.1"
+version = "0.16.2"
 edition = "2024"
 rust-version = "1.85"
 description = "Web-based terminal emulator — opens a real PTY in the browser over WebSocket"
-license-file = "LICENSE"
+license = "MIT"
 repository = "https://github.com/Alviner/tty-web"
 homepage = "https://github.com/Alviner/tty-web"
 documentation = "https://alviner.github.io/tty-web"

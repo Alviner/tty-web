@@ -42,8 +42,22 @@ Full documentation is available at **[alviner.github.io/tty-web](https://alviner
 ```bash
 make build     # debug
 make release   # release
-make docker    # docker image
+make docker    # docker playground image
 ```
+
+### Local Docker build (macOS)
+
+Building Docker images on macOS requires cross-compilation to Linux.
+Install [zig](https://ziglang.org/) and [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild):
+
+```bash
+brew install zig
+cargo install cargo-zigbuild
+rustup target add aarch64-unknown-linux-musl  # Apple Silicon
+rustup target add x86_64-unknown-linux-musl   # Intel
+```
+
+Then `make docker` will cross-compile and build the image automatically.
 
 ## License
 

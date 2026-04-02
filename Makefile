@@ -26,11 +26,15 @@ lint:
 check:
 	cargo check
 
-docker: release
-	docker build --target playground --build-arg BINARY=target/$(TARGET)/release/tty-web -t $(IMAGE):$(VERSION)-playground .
+DOCKER_TARGET ?= $(shell uname -m | sed 's/arm64/aarch64/' | sed 's/x86_64/x86_64/')-unknown-linux-musl
 
-docker-minimal: release
-	docker build --target minimal --build-arg BINARY=target/$(TARGET)/release/tty-web -t $(IMAGE):$(VERSION) .
+docker:
+	cargo zigbuild --release --target $(DOCKER_TARGET)
+	docker build --target playground --build-arg BINARY=target/$(DOCKER_TARGET)/release/tty-web -t $(IMAGE):$(VERSION)-playground .
+
+docker-minimal:
+	cargo zigbuild --release --target $(DOCKER_TARGET)
+	docker build --target minimal --build-arg BINARY=target/$(DOCKER_TARGET)/release/tty-web -t $(IMAGE):$(VERSION) .
 
 docs:
 	mdbook build docs

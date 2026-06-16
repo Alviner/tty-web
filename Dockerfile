@@ -3,7 +3,7 @@ ARG BINARY=target/x86_64-unknown-linux-musl/release/tty-web
 COPY ${BINARY} /tty-web
 ENTRYPOINT ["/tty-web"]
 
-FROM --platform=$BUILDPLATFORM ubuntu:24.04@sha256:84e77dee7d1bc93fb029a45e3c6cb9d8aa4831ccfcc7103d36e876938d28895b AS playground
+FROM --platform=$BUILDPLATFORM ubuntu:26.04@sha256:f3d28607ddd78734bb7f71f117f3c6706c666b8b76cbff7c9ff6e5718d46ff64 AS playground
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LANG=C.UTF-8

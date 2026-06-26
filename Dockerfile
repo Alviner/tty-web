@@ -16,7 +16,6 @@ RUN --mount=type=cache,target=/var/lib/apt/lists \
     curl \
     git \
     htop \
-    neofetch \
     unzip \
     vim \
     zsh
